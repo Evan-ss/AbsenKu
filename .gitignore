@@ -1,0 +1,30 @@
+# Dependencies
+absensi-app/node_modules/
+node_modules/
+
+# Next.js build
+absensi-app/.next/
+.next/
+
+# Prisma
+absensi-app/prisma/*.db
+absensi-app/prisma/*.db-journal
+
+# Environment
+absensi-app/.env
+absensi-app/.env.local
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temp files
+nul

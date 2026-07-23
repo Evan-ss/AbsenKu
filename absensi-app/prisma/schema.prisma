@@ -1,0 +1,95 @@
+// Schema Prisma untuk Aplikasi Absensi Siswa (Face Recognition)
+// Database: MySQL
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================
+// MODEL: USER (Admin & Siswa)
+// ============================
+model User {
+  id             String    @id @default(uuid()) @db.Char(36)
+  nama           String
+  nis            String?   @unique
+  email          String    @unique
+  password       String
+  role           Role      @default(SISWA)
+  faceDescriptor Json?
+  isActive       Boolean   @default(true)
+  kelasId        String?   @db.Char(36)
+  kelas          Kelas?    @relation(fields: [kelasId], references: [id])
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  absensi        Absensi[]
+
+  @@map("users")
+}
+
+enum Role {
+  ADMIN
+  SISWA
+}
+
+// ============================
+// MODEL: KELAS
+// ============================
+model Kelas {
+  id        String   @id @default(uuid()) @db.Char(36)
+  namaKelas String   @unique
+  waliKelas String?
+  createdAt DateTime @default(now())
+
+  siswa     User[]
+
+  @@map("kelas")
+}
+
+// ============================
+// MODEL: ABSENSI
+// ============================
+model Absensi {
+  id          String        @id @default(uuid()) @db.Char(36)
+  userId      String        @db.Char(36)
+  user        User          @relation(fields: [userId], references: [id])
+  tanggal     DateTime      @db.Date
+  waktuMasuk  DateTime?
+  waktuPulang DateTime?
+  status      StatusAbsensi @default(HADIR)
+  keterangan  String?
+  createdAt   DateTime      @default(now())
+
+  @@unique([userId, tanggal])
+  @@index([tanggal, status])
+  @@map("absensi")
+}
+
+enum StatusAbsensi {
+  HADIR
+  TELAT
+  IZIN
+  SAKIT
+  ALPA
+}
+
+// ============================
+// MODEL: JADWAL ABSENSI
+// ============================
+model JadwalAbsensi {
+  id               String   @id @default(uuid()) @db.Char(36)
+  namaJadwal       String   @default("Jadwal Utama")
+  jamMulaiMasuk    String
+  jamSelesaiMasuk  String
+  jamMulaiPulang   String?
+  jamSelesaiPulang String?
+  aktif            Boolean  @default(true)
+  updatedAt        DateTime @updatedAt
+
+  @@map("jadwal_absensi")
+}
