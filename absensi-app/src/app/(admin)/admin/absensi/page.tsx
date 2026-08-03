@@ -72,7 +72,12 @@ function formatTime(dateStr: string | null) {
 }
 
 function todayISO() {
-  return new Date().toISOString().split("T")[0];
+  // Pakai tanggal LOKAL (bukan UTC) — toISOString() mengambil tanggal UTC,
+  // jadi di WIB dini hari (00:00-07:00) default "hari ini" bisa mundur 1 hari.
+  const d = new Date();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${mm}-${dd}`;
 }
 
 export default function AbsensiPage() {

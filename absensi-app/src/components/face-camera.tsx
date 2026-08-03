@@ -14,6 +14,13 @@ const OVAL_OFFSET_Y = -10;
 // Check if face center is roughly inside the oval guide area
 // Uses a buffer zone (1.3x) so the face doesn't need to be perfectly centered
 const OVAL_BUFFER = 1.3;
+
+// Confidence threshold untuk TinyFaceDetector.
+// Penting: 0.5 terlalu rendah → banyak false-positive (objek NON-wajah seperti
+// dinding, poster, bahu ikut "terdeteksi"), dan descriptor dari area non-wajah
+// cenderung MIRIP antar orang → bisa lolos threshold meski bukan wajah asli.
+// 0.6 adalah nilai aman yang sudah terbukti untuk deteksi wajah sehari-hari.
+const SCORE_THRESHOLD = 0.6;
 function isFaceInOval(
   faceX: number,
   faceY: number,
@@ -88,14 +95,24 @@ function drawFaceGuide(
   ctx.fillStyle = "rgba(255, 255, 255, 0.25)";
   ctx.fill();
 
-  // Countdown display — center of oval
+  // Countdown display — center of oval (hanya lingkaran/pulse, teks di bawah)
   if (countdown !== null && countdown > 0) {
     const pulseSize = 60 + (3 - countdown) * 10;
     ctx.beginPath();
     ctx.arc(centerX, centerY, pulseSize / 2, 0, Math.PI * 2);
     ctx.fillStyle = "rgba(16, 185, 129, 0.15)";
     ctx.fill();
+  }
 
+  // ===== TEKS (countdown + label) =====
+  // Video & canvas ditampilkan ter-flip horizontal (tampilan mirror/selfie).
+  // Supaya teks TIDAK ikut terbalik, teks digambar dalam space yang
+  // di-mirror-balik via transform canvas (translate + scale(-1,1)).
+  ctx.save();
+  ctx.translate(width, 0);
+  ctx.scale(-1, 1);
+
+  if (countdown !== null && countdown > 0) {
     ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
     ctx.font = "bold 48px sans-serif";
     ctx.textAlign = "center";
@@ -115,6 +132,7 @@ function drawFaceGuide(
   if (countdown !== null && countdown > 0) label = "Mengambil data...";
 
   ctx.fillText(label, centerX, height - 20);
+  ctx.restore();
 }
 
 interface FaceCameraProps {
@@ -156,9 +174,18 @@ export default function FaceCamera({
   );
   const [modelsLoaded, setModelsLoaded] = useState(false);
   const [cameraActive, setCameraActive] = useState(false);
-  const [detecting, setDetecting] = useState(false);
+  // Guard anti race-condition: pakai ref, bukan state.
+  // useCallback dengan deps stabil membuat closure detectFace SELALU melihat
+  // nilai state awal (false), jadi guard state tidak pernah berfungsi dan
+  // deteksi bisa tumpang tindih (race) saat latency > interval 500ms.
+  const detectingRef = useRef(false);
   const [highlight, setHighlight] = useState<"none" | "finding" | "in-position">("none");
   const [countdown, setCountdown] = useState<number | null>(null);
+
+  // Ref untuk onError — mencegah useEffect kamera/model jalan ulang hanya
+  // karena prop callback berubah (parent yang tidak pakai useCallback).
+  const onErrorRef = useRef(onError);
+  onErrorRef.current = onError;
 
   // Draw initial guide when camera is ready
   useEffect(() => {
@@ -205,7 +232,7 @@ export default function FaceCamera({
         if (!cancelled) {
           setStatus("error");
           setStatusMessage("Gagal memuat model face recognition");
-          onError?.("Gagal memuat model face recognition");
+          onErrorRef.current?.("Gagal memuat model face recognition");
         }
       }
     }
@@ -214,12 +241,17 @@ export default function FaceCamera({
     return () => {
       cancelled = true;
     };
-  }, [onError]);
+  }, []);
 
   // Start camera
+  // Penting: deps HANYA [modelsLoaded]. Sebelumnya [modelsLoaded, onError] —
+  // karena onError sering merupakan fungsi baru tiap render (parent tidak
+  // pakai useCallback), effect ini jalan ulang berulang kali dan getUserMedia
+  // dipanggil lagi-lagi → kamera tidak pernah settle (stuck "Mengakses kamera...").
   useEffect(() => {
     if (!modelsLoaded) return;
     let cancelled = false;
+    let timeout: number | null = null;
 
     async function startCamera() {
       try {
@@ -252,16 +284,37 @@ export default function FaceCamera({
               ? "Izin kamera ditolak. Izinkan akses kamera di browser."
               : "Gagal mengakses kamera";
           setStatusMessage(msg);
-          onError?.(msg);
+          onErrorRef.current?.(msg);
         }
+      } finally {
+        if (timeout) clearTimeout(timeout);
       }
     }
+
+    // Timeout pengaman: kalau getUserMedia tidak merespons dalam 12 detik
+    // (mis. prompt izin tidak diklik), tampilkan pesan error yang jelas
+    // daripada stuck selamanya di "Mengakses kamera...".
+    timeout = window.setTimeout(() => {
+      if (!cancelled) {
+        setStatus("error");
+        const msg =
+          "Kamera tidak merespons. Pastikan izin kamera diizinkan di browser, lalu muat ulang halaman.";
+        setStatusMessage(msg);
+        onErrorRef.current?.(msg);
+      }
+    }, 12000);
 
     startCamera();
     return () => {
       cancelled = true;
+      if (timeout) clearTimeout(timeout);
+      // Hentikan stream lama agar kamera tidak terkunci oleh request berulang
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+      }
     };
-  }, [modelsLoaded, onError]);
+  }, [modelsLoaded]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -323,26 +376,27 @@ export default function FaceCamera({
 
   // Detect face periodically
   const detectFace = useCallback(async () => {
-    if (!videoRef.current || !canvasRef.current || detecting) return;
+    if (!videoRef.current || !canvasRef.current || detectingRef.current) return;
 
     const faceapi = await import("face-api.js");
 
-    setDetecting(true);
+    detectingRef.current = true;
     try {
       const detection = await faceapi
         .detectSingleFace(
           videoRef.current,
           new faceapi.TinyFaceDetectorOptions({
             inputSize: 224,
-            scoreThreshold: 0.5,
+            scoreThreshold: SCORE_THRESHOLD,
           })
         )
         .withFaceLandmarks()
         .withFaceDescriptor();
 
       const canvas = canvasRef.current;
+      if (!canvas) return;
       const ctx = canvas.getContext("2d");
-      if (!canvas || !ctx) return;
+      if (!ctx) return;
 
       const dims = {
         width: videoRef.current.videoWidth,
@@ -382,7 +436,13 @@ export default function FaceCamera({
           setHighlight("in-position");
 
           // Store descriptor for later use
-          descriptorRef.current = Array.from(detection.descriptor);
+          // Validasi: descriptor wajib Float32Array 128-dimensi. Kalau tidak ada/
+          // salah panjang, jangan disimpan (mencegah descriptor rusak terkirim).
+          if (detection.descriptor && detection.descriptor.length === 128) {
+            descriptorRef.current = Array.from(detection.descriptor);
+          } else {
+            descriptorRef.current = null;
+          }
 
           // Report detection state
           onDetectionUpdate?.({
@@ -390,8 +450,8 @@ export default function FaceCamera({
             confidence: detection.detection.score,
           });
 
-          // Start countdown if not already started
-          if (!countdownTimerRef.current) {
+          // Start countdown only if a valid descriptor was captured
+          if (descriptorRef.current && !countdownTimerRef.current) {
             startCountdown();
           }
         } else {
@@ -410,8 +470,13 @@ export default function FaceCamera({
         }
 
         // Draw detection box + landmarks
+        // NOTE: box digambar MANUAL (strokeRect) tanpa teks — karena teks score
+        // dari drawDetections akan ikut ter-mirror oleh CSS flip video/canvas.
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        faceapi.draw.drawDetections(canvas, resized);
+        const box = resized.detection.box;
+        ctx.strokeStyle = "rgba(59, 130, 246, 0.7)";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(box.x, box.y, box.width, box.height);
         try {
           faceapi.draw.drawFaceLandmarks(canvas, resized);
         } catch {
@@ -449,7 +514,15 @@ export default function FaceCamera({
         onDetectionUpdate?.({ detected: false, confidence: 0 });
         onPositionUpdate?.({ inOval: false, countdown: null });
       }
-    } catch {
+    } catch (err) {
+      // Kritis: jangan biarkan error ditelan diam-diam.
+      // Sebelumnya: countdown TIDAK dibatalkan & descriptorRef TIDAK dikosongkan,
+      // sehingga saat hitung mundur habis, DESCRIPTOR BASI dari frame sebelumnya
+      // tetap terkirim ke server → absen bisa tercatat padahal wajah tidak lagi
+      // ada di frame (atau wajahnya sudah orang lain).
+      // Catatan: resetCountdown() juga mengosongkan descriptorRef secara internal.
+      resetCountdown();
+
       // Clear canvas and draw guide on error
       if (canvasRef.current) {
         const ctx = canvasRef.current.getContext("2d");
@@ -458,10 +531,11 @@ export default function FaceCamera({
           drawFaceGuide(ctx, canvasRef.current.width, canvasRef.current.height, "none");
         }
       }
+      console.error("Face detection error:", err);
       onDetectionUpdate?.({ detected: false, confidence: 0 });
       onPositionUpdate?.({ inOval: false, countdown: null });
     } finally {
-      setDetecting(false);
+      detectingRef.current = false;
     }
   }, [
     onFaceDetected,
@@ -508,15 +582,17 @@ export default function FaceCamera({
           autoPlay
           muted
           playsInline
-          className={`w-full h-full object-cover ${
+          className={`w-full h-full object-cover -scale-x-100 ${
             cameraActive ? "opacity-100" : "opacity-0"
           }`}
         />
 
         {/* Canvas overlay for face box */}
+        {/* -scale-x-100: flip horizontal SAMA dengan video supaya kotak wajah &
+            oval tetap sejajar dengan video (tampilan mirror/selfie) */}
         <canvas
           ref={canvasRef}
-          className="absolute inset-0 w-full h-full pointer-events-none"
+          className="absolute inset-0 w-full h-full pointer-events-none -scale-x-100"
         />
 
         {/* Countdown ring animation */}

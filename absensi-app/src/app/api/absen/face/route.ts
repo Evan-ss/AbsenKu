@@ -126,8 +126,19 @@ export async function POST(req: NextRequest) {
     };
 
     // Cek apakah sudah absen hari ini (pakai user ID yang login)
+    // PENTING: pakai Date.UTC, BUKAN new Date(y,m,d) (local midnight).
+    // Kolom `tanggal` di MySQL bertipe DATE dan Prisma men-serialize nilai
+    // tanggal berdasarkan bagian UTC. Kalau kita kirim local midnight
+    // (mis. 2026-08-04 00:00 WIB = 2026-08-03T17:00Z), maka:
+    //   - INSERT menyimpan '2026-08-03' (tanggal UTC)
+    //   - findUnique mencari '2026-08-04' (tanggal lokal)
+    // Keduanya berbeda → cek "sudah absen" selalu NULL → insert kedua
+    // menabrak unique constraint (P2002) → error 500.
+    // Dengan Date.UTC, insert & cek sama-sama memakai 'YYYY-MM-DD' lokal.
     const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const today = new Date(
+      Date.UTC(now.getFullYear(), now.getMonth(), now.getDate())
+    );
 
     const existingAbsensi = await prisma.absensi.findUnique({
       where: {
@@ -151,14 +162,14 @@ export async function POST(req: NextRequest) {
     }
 
     // Tentukan status (HADIR / TELAT)
-    const status = await determineStatus(new Date());
+    const status = await determineStatus(now);
 
     // Catat absensi
     const absensi = await prisma.absensi.create({
       data: {
         userId: bestMatch.id,
         tanggal: today,
-        waktuMasuk: new Date(),
+        waktuMasuk: now,
         status,
       },
       select: {

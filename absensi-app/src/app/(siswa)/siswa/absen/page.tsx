@@ -114,9 +114,12 @@ export default function AbsenPage() {
     setCountdown(null);
   };
 
-  const handleCameraError = (msg: string) => {
+  // useCallback agar referensi stabil — kalau tidak, tiap re-render membuat
+  // fungsi baru → useEffect kamera di FaceCamera (deps [modelsLoaded, onError])
+  // jalan ulang → getUserMedia dipanggil berulang → kamera stuck.
+  const handleCameraError = useCallback((msg: string) => {
     setCameraError(msg);
-  };
+  }, []);
 
   // Format jam
   const formatTime = (dateStr: string) => {
