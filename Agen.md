@@ -93,13 +93,12 @@ waktu_sekarang > jamSelesaiMasuk       → status: TELAT (atau ditolak,
 ## 🗄️ Schema Database (Prisma + MySQL + UUID)
 
 ```prisma
-datasource db {
-  provider = "mysql"
-  url      = env("DATABASE_URL")
-}
-
 generator client {
   provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
 }
 
 model User {
@@ -110,27 +109,23 @@ model User {
   password       String
   role           Role      @default(SISWA)
   faceDescriptor Json?
+  isActive       Boolean   @default(true)
   kelasId        String?   @db.Char(36)
   kelas          Kelas?    @relation(fields: [kelasId], references: [id])
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
-
   absensi        Absensi[]
 
   @@map("users")
 }
 
-enum Role {
-  ADMIN
-  SISWA
-}
+enum Role { ADMIN, SISWA }
 
 model Kelas {
   id        String   @id @default(uuid()) @db.Char(36)
   namaKelas String   @unique
   waliKelas String?
   createdAt DateTime @default(now())
-
   siswa     User[]
 
   @@map("kelas")
@@ -140,7 +135,7 @@ model Absensi {
   id          String        @id @default(uuid()) @db.Char(36)
   userId      String        @db.Char(36)
   user        User          @relation(fields: [userId], references: [id])
-  tanggal     DateTime      @default(now()) @db.Date
+  tanggal     DateTime      @db.Date
   waktuMasuk  DateTime?
   waktuPulang DateTime?
   status      StatusAbsensi @default(HADIR)
@@ -148,16 +143,11 @@ model Absensi {
   createdAt   DateTime      @default(now())
 
   @@unique([userId, tanggal])
+  @@index([tanggal, status])
   @@map("absensi")
 }
 
-enum StatusAbsensi {
-  HADIR
-  TELAT
-  IZIN
-  SAKIT
-  ALPA
-}
+enum StatusAbsensi { HADIR, TELAT, IZIN, SAKIT, ALPA }
 
 model JadwalAbsensi {
   id               String   @id @default(uuid()) @db.Char(36)
@@ -198,16 +188,23 @@ model JadwalAbsensi {
 
 ## 📌 Status Project
 
-- [ ] Setup project Next.js + TypeScript
-- [ ] Setup Prisma + MySQL + migration awal
-- [ ] Implementasi Auth (NextAuth.js)
+- [x] Setup project Next.js + TypeScript + Tailwind + App Router
+- [x] Install dependencies (Prisma, Zod, NextAuth, bcryptjs, dotenv)
+- [x] Setup Prisma + schema database (User, Kelas, Absensi, JadwalAbsensi)
+- [ ] Setup Prisma + MySQL + migration awal (⚠️ butuh MySQL running)
+- [x] Setup NextAuth.js (Credentials provider, JWT session, role callbacks)
+- [x] Middleware proteksi role (admin/siswa)
+- [x] Landing page (role-based redirect or hero)
+- [x] Halaman Login (form + loading state)
+- [x] Halaman Register (khusus admin, validasi Zod)
+- [x] Halaman Admin (layout sidebar, dashboard, placeholder CRUD)
+- [x] Halaman Siswa (layout sidebar, dashboard, placeholder absen/riwayat)
 - [ ] CRUD Siswa
 - [ ] CRUD Kelas
 - [ ] CRUD Absensi
 - [ ] Fitur Face Recognition (face-api.js)
 - [ ] Pengaturan Jadwal Absensi
-- [ ] Middleware proteksi role
 - [ ] Testing & deployment
 
 > Update checklist ini setiap kali sebuah fitur selesai dikerjakan, supaya
-> sesi berikutnya tahu progress project tanpa perlu ditanya ulang.  
+> sesi berikutnya tahu progress project tanpa perlu ditanya ulang.
