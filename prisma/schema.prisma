@@ -11,7 +11,7 @@ datasource db {
 }
 
 // ============================
-// MODEL: USER (Admin & Siswa)
+// MODEL: USER (Admin, Guru & Siswa)
 // ============================
 model User {
   id             String    @id @default(uuid()) @db.Char(36)
@@ -27,7 +27,10 @@ model User {
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
-  absensi        Absensi[]
+  absensi     Absensi[]
+  guruKelas   GuruKelas[]  @relation("GuruKelasGuru")
+  suratIzin   SuratIzin[]  @relation("SuratSiswa")
+  suratReview SuratIzin[]  @relation("ReviewerSurat")
 
   @@map("users")
 }
@@ -35,6 +38,7 @@ model User {
 enum Role {
   ADMIN
   SISWA
+  GURU
 }
 
 // ============================
@@ -47,8 +51,62 @@ model Kelas {
   createdAt DateTime @default(now())
 
   siswa     User[]
+  guruKelas GuruKelas[] @relation("GuruKelasKelas")
 
   @@map("kelas")
+}
+
+// ============================
+// MODEL: GURU KELAS (pivot guru ↔ kelas)
+// Menghubungkan akun Guru dengan kelas yang menjadi tanggung jawabnya.
+// Dipakai untuk "Menu Pilih Kelas" di dashboard guru.
+// ============================
+model GuruKelas {
+  guruId    String   @db.Char(36)
+  kelasId   String   @db.Char(36)
+  guru      User     @relation("GuruKelasGuru", fields: [guruId], references: [id], onDelete: Cascade)
+  kelas     Kelas    @relation("GuruKelasKelas", fields: [kelasId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@id([guruId, kelasId])
+  @@map("guru_kelas")
+}
+
+// ============================
+// MODEL: SURAT IZIN / SAKIT
+// Pengajuan surat oleh siswa (foto bukti) yang direview guru.
+// - status MENUNGGU  → "Menunggu Konfirmasi" di dashboard guru
+// - Setujui          → absensi siswa menjadi SAKIT/IZIN
+// - Tolak            → absensi siswa menjadi ALPA
+// ============================
+model SuratIzin {
+  id         String      @id @default(uuid()) @db.Char(36)
+  userId     String      @db.Char(36)
+  user       User        @relation("SuratSiswa", fields: [userId], references: [id], onDelete: Cascade)
+  tanggal    DateTime    @db.Date // tanggal absen yang diajukan
+  jenis      JenisSurat  @default(IZIN)
+  fotoSurat  String      @db.VarChar(500) // path/URL foto bukti di folder upload
+  keterangan String?
+  status     StatusSurat @default(MENUNGGU)
+  reviewedBy String?     @db.Char(36) // guru yang mereview
+  reviewer   User?       @relation("ReviewerSurat", fields: [reviewedBy], references: [id], onDelete: SetNull)
+  reviewedAt DateTime?
+  createdAt  DateTime    @default(now())
+
+  @@index([status])
+  @@index([userId, tanggal])
+  @@map("surat_izin")
+}
+
+enum JenisSurat {
+  SAKIT
+  IZIN
+}
+
+enum StatusSurat {
+  MENUNGGU
+  DISETUJUI
+  DITOLAK
 }
 
 // ============================
