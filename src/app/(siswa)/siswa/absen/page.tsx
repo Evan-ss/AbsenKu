@@ -3,8 +3,9 @@
 import { useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import FaceCamera from "@/components/face-camera";
+import { formatTime } from "@/lib/format";
 
-type Step = "idle" | "scanning" | "success" | "error" | "already-absen";
+type Step = "idle" | "scanning" | "success" | "error" | "already-absen" | "manual";
 
 interface AbsenResult {
   message: string;
@@ -35,6 +36,7 @@ export default function AbsenPage() {
     "waiting" | "finding" | "in-position"
   >("waiting");
   const [countdown, setCountdown] = useState<number | null>(null);
+  const [failedAttempts, setFailedAttempts] = useState(0);
 
   // Handle face captured — auto-submit after countdown finishes
   const handleFaceDetected = useCallback(
@@ -60,19 +62,33 @@ export default function AbsenPage() {
 
         if (data.match && data.alreadyAbsen) {
           setStep("already-absen");
+          setFailedAttempts(0);
         } else if (data.match) {
           setStep("success");
+          setFailedAttempts(0);
         } else {
-          setStep("error");
-          setErrorMsg(
-            data.message || "Wajah tidak dikenali. Silakan coba lagi."
-          );
+          const newFailed = failedAttempts + 1;
+          setFailedAttempts(newFailed);
+          if (newFailed >= 3) {
+            setStep("manual");
+          } else {
+            setStep("error");
+            setErrorMsg(
+              `Wajah tidak cocok (${newFailed}/3). Silakan coba lagi.`
+            );
+          }
         }
 
         setResult(data);
       } catch {
-        setStep("error");
-        setErrorMsg("Terjadi kesalahan koneksi");
+        const newFailed = failedAttempts + 1;
+        setFailedAttempts(newFailed);
+        if (newFailed >= 3) {
+          setStep("manual");
+        } else {
+          setStep("error");
+          setErrorMsg(`Koneksi gagal (${newFailed}/3). Coba lagi.`);
+        }
       } finally {
         setSubmitting(false);
       }
@@ -112,6 +128,11 @@ export default function AbsenPage() {
     setCameraError("");
     setPositionStatus("waiting");
     setCountdown(null);
+    setFailedAttempts(0);
+  };
+
+  const goToManual = () => {
+    setStep("manual");
   };
 
   // useCallback agar referensi stabil — kalau tidak, tiap re-render membuat
@@ -121,13 +142,7 @@ export default function AbsenPage() {
     setCameraError(msg);
   }, []);
 
-  // Format jam
-  const formatTime = (dateStr: string) => {
-    return new Date(dateStr).toLocaleTimeString("id-ID", {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  };
+
 
   return (
     <div className="max-w-2xl mx-auto">
@@ -204,13 +219,23 @@ export default function AbsenPage() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 </svg>
               </div>
-              <p className="text-lg font-semibold">{errorMsg}</p>
-              <button
-                onClick={resetCamera}
-                className="mt-4 px-6 py-2 bg-white/20 hover:bg-white/30 rounded-lg text-sm font-medium transition-colors"
-              >
-                Coba Lagi
-              </button>
+              <p className="text-lg font-semibold text-center px-4">{errorMsg}</p>
+              <div className="flex flex-col gap-2 mt-4">
+                <button
+                  onClick={resetCamera}
+                  className="px-6 py-2 bg-white/20 hover:bg-white/30 rounded-lg text-sm font-medium transition-colors"
+                >
+                  Coba Lagi ({3 - failedAttempts} tersisa)
+                </button>
+                {failedAttempts >= 2 && (
+                  <button
+                    onClick={goToManual}
+                    className="px-6 py-2 bg-amber-500 hover:bg-amber-600 rounded-lg text-sm font-medium transition-colors"
+                  >
+                    Absen Manual →
+                  </button>
+                )}
+              </div>
             </div>
           )}
 
@@ -218,6 +243,32 @@ export default function AbsenPage() {
             <div className="absolute inset-0 bg-blue-900/60 flex flex-col items-center justify-center text-white rounded-xl">
               <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white mb-3" />
               <p className="text-sm">Memverifikasi wajah...</p>
+            </div>
+          )}
+
+          {step === "manual" && (
+            <div className="absolute inset-0 bg-gradient-to-br from-amber-900/90 to-orange-900/90 flex flex-col items-center justify-center text-white rounded-xl p-6">
+              <div className="w-16 h-16 bg-amber-500 rounded-full flex items-center justify-center mb-4">
+                <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                </svg>
+              </div>
+              <p className="text-lg font-semibold mb-1">Face Recognition Gagal</p>
+              <p className="text-sm text-amber-200 text-center mb-4">
+                Wajah tidak dapat dikenali setelah 3 percobaan.
+                <br />Silakan absen manual.
+              </p>
+              <ManualAbsenButton
+                onDone={() => {
+                  setStep("success");
+                  setResult({
+                    message: "Absen manual berhasil!",
+                    match: true,
+                    alreadyAbsen: false,
+                    absensi: { id: "", status: "HADIR", waktuMasuk: new Date().toISOString() },
+                  });
+                }}
+              />
             </div>
           )}
         </FaceCamera>
@@ -288,16 +339,18 @@ export default function AbsenPage() {
           {cameraError && (
             <div className="text-center">
               <p className="text-sm text-red-600 mb-3">{cameraError}</p>
-              <p className="text-xs text-gray-500">
-                Pastikan browser memiliki izin untuk mengakses kamera, atau
-                hubungi admin untuk absen manual.
+              <p className="text-xs text-gray-500 mb-4">
+                Kamera tidak tersedia. Kamu bisa absen manual di bawah.
               </p>
-              <button
-                onClick={() => window.location.reload()}
-                className="mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 transition-colors"
-              >
-                Coba Lagi
-              </button>
+              <div className="flex flex-col gap-2 items-center">
+                <button
+                  onClick={() => window.location.reload()}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 transition-colors"
+                >
+                  Coba Lagi
+                </button>
+                <ManualAbsenButton onDone={() => { setStep("success"); setResult({ message: "Absen manual berhasil!", match: true, alreadyAbsen: false, absensi: { id: "", status: "HADIR", waktuMasuk: new Date().toISOString() } }); }} />
+              </div>
             </div>
           )}
 
@@ -367,5 +420,85 @@ export default function AbsenPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+// Manual Absen Button Component
+function ManualAbsenButton({ onDone }: { onDone: () => void }) {
+  const [showModal, setShowModal] = useState(false);
+  const [status, setStatus] = useState<"HADIR" | "IZIN" | "SAKIT">("HADIR");
+  const [keterangan, setKeterangan] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleSubmit = async () => {
+    setSubmitting(true);
+    try {
+      const res = await fetch("/api/absen/manual", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status, keterangan: keterangan || undefined }),
+      });
+      const result = await res.json();
+      if (!res.ok) {
+        alert(result.message);
+        return;
+      }
+      setShowModal(false);
+      onDone();
+    } catch {
+      alert("Terjadi kesalahan");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <>
+      <button
+        onClick={() => setShowModal(true)}
+        className="px-4 py-2 bg-amber-600 text-white rounded-lg text-sm hover:bg-amber-700 transition-colors"
+      >
+        Absen Manual
+      </button>
+
+      {showModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 bg-black/50" onClick={() => setShowModal(false)} />
+          <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 z-10">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">Absen Manual</h3>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                <select
+                  value={status}
+                  onChange={(e) => setStatus(e.target.value as "HADIR" | "IZIN" | "SAKIT")}
+                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-amber-500 focus:border-amber-500 outline-none"
+                >
+                  <option value="HADIR">Hadir</option>
+                  <option value="IZIN">Izin</option>
+                  <option value="SAKIT">Sakit</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Keterangan (Opsional)</label>
+                <input
+                  type="text"
+                  value={keterangan}
+                  onChange={(e) => setKeterangan(e.target.value)}
+                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-amber-500 focus:border-amber-500 outline-none"
+                  placeholder="Alasan izin/sakit..."
+                />
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button onClick={() => setShowModal(false)} className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 text-sm font-medium">Batal</button>
+                <button onClick={handleSubmit} disabled={submitting} className="flex-1 px-4 py-2.5 bg-amber-600 hover:bg-amber-700 disabled:bg-amber-400 text-white rounded-lg text-sm font-medium">
+                  {submitting ? "Memproses..." : "Kirim"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }

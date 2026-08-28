@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { useSweetAlert } from "@/components/sweet-alert";
+import DateInput from "@/components/date-input";
 
 // Types
 interface Kelas {
@@ -81,6 +83,7 @@ function todayISO() {
 }
 
 export default function AbsensiPage() {
+  const { showAlert } = useSweetAlert();
   // Data state
   const [absensiList, setAbsensiList] = useState<Absensi[]>([]);
   const [kelasList, setKelasList] = useState<Kelas[]>([]);
@@ -241,7 +244,7 @@ export default function AbsensiPage() {
       setDeleteTarget(null);
       fetchAbsensi();
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Gagal menghapus");
+      showAlert({ title: "Gagal", message: err instanceof Error ? err.message : "Gagal menghapus", type: "error" });
     } finally {
       setDeleting(false);
     }
@@ -285,24 +288,40 @@ export default function AbsensiPage() {
             Monitoring dan kelola data absensi
           </p>
         </div>
-        <button
-          onClick={() => {
-            setAddForm({
-              userId: "",
-              tanggal: todayISO(),
-              status: "HADIR",
-              keterangan: "",
-            });
-            setAddFormError("");
-            setAddModalOpen(true);
-          }}
-          className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-lg text-sm font-medium transition-colors"
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-          </svg>
-          Catat Manual
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => {
+              setAddForm({
+                userId: "",
+                tanggal: todayISO(),
+                status: "HADIR",
+                keterangan: "",
+              });
+              setAddFormError("");
+              setAddModalOpen(true);
+            }}
+            className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-lg text-sm font-medium transition-colors"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+            Catat Manual
+          </button>
+          <button
+            onClick={() => {
+              const now = new Date();
+              const bulan = String(now.getMonth() + 1);
+              const tahun = String(now.getFullYear());
+              window.open(`/api/admin/absensi/export?bulan=${bulan}&tahun=${tahun}${filterKelas ? `&kelasId=${filterKelas}` : ""}`, "_blank");
+            }}
+            className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-lg text-sm font-medium transition-colors"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            Export Excel
+          </button>
+        </div>
       </div>
 
       {/* Stats cards */}
@@ -344,11 +363,10 @@ export default function AbsensiPage() {
             <label className="block text-xs font-medium text-gray-500 mb-1">
               Tanggal
             </label>
-            <input
-              type="date"
+            <DateInput
               value={tanggal}
-              onChange={(e) => {
-                setTanggal(e.target.value);
+              onChange={(val) => {
+                setTanggal(val);
                 setPagination((p) => ({ ...p, page: 1 }));
               }}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none text-sm"
@@ -721,11 +739,9 @@ export default function AbsensiPage() {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Tanggal</label>
-                <input
-                  type="date"
-                  required
+                <DateInput
                   value={addForm.tanggal}
-                  onChange={(e) => setAddForm({ ...addForm, tanggal: e.target.value })}
+                  onChange={(val) => setAddForm({ ...addForm, tanggal: val })}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none text-sm"
                 />
               </div>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { useSweetAlert } from "@/components/sweet-alert";
 
 interface Jadwal {
   id: string;
@@ -30,6 +31,7 @@ const emptyForm: JadwalForm = {
 };
 
 export default function JadwalPage() {
+  const { showAlert } = useSweetAlert();
   const [jadwalList, setJadwalList] = useState<Jadwal[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -142,7 +144,7 @@ export default function JadwalPage() {
       setDeleteTarget(null);
       fetchJadwal();
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Gagal menghapus");
+      showAlert({ title: "Gagal", message: err instanceof Error ? err.message : "Gagal menghapus", type: "error" });
     } finally {
       setDeleting(false);
     }
@@ -158,7 +160,7 @@ export default function JadwalPage() {
       if (!res.ok) throw new Error("Gagal mengubah status");
       fetchJadwal();
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Gagal mengubah status");
+      showAlert({ title: "Gagal", message: err instanceof Error ? err.message : "Gagal mengubah status", type: "error" });
     }
   };
 

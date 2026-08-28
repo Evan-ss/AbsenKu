@@ -1,6 +1,11 @@
 import type { NextConfig } from "next";
+import path from "path";
 
 const nextConfig: NextConfig = {
+  // Fix "multiple lockfiles" warning: explicitly set workspace root
+  turbopack: {
+    root: path.join(__dirname),
+  },
   // Enable React strict mode for development
   reactStrictMode: true,
 

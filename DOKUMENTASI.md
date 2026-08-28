@@ -210,7 +210,7 @@ AbsenKu/
 │   │   ├── components/             ← Komponen React reusable
 │   │   ├── lib/                    ← Utilitas (auth, prisma, validasi)
 │   │   ├── types/                  ← Definisi tipe TypeScript
-│   │   └── middleware.ts           ← Proteksi akses route
+│   │   └── proxy.ts               ← Proteksi akses route
 │   ├── package.json                ← Dependencies & scripts
 │   ├── tsconfig.json               ← Konfigurasi TypeScript
 │   ├── next.config.ts              ← Konfigurasi Next.js
@@ -225,7 +225,7 @@ AbsenKu/
 
 ```
 src/
-├── middleware.ts                     ← NextAuth middleware: proteksi /admin & /siswa
+├── proxy.ts                          ← NextAuth proxy: proteksi /admin & /siswa
 ├── app/
 │   ├── layout.tsx                    ← Root layout (seluruh app)
 │   ├── page.tsx                      ← Landing page (redirect ke /login)
@@ -285,7 +285,7 @@ src/
 |------|----------------|
 | `face-camera.tsx` | Komponen inti kamera: memuat model face-api.js, deteksi wajah tiap 500ms, menggambar oval guide, cek posisi wajah (ellipse equation + buffer 1.3x), countdown 3 detik, confidence bar, menghasilkan face descriptor |
 | `face-capture.tsx` | Membungkus `FaceCamera` untuk kebutuhan admin: alur rekam → konfirmasi → simpan wajah |
-| `middleware.ts` | Proteksi role: `/admin/*` hanya untuk ADMIN, `/siswa/*` hanya untuk SISWA; belum login → redirect `/login` |
+| `proxy.ts` | Proteksi role: `/admin/*` hanya untuk ADMIN, `/siswa/*` hanya untuk SISWA; belum login → redirect `/login` |
 | `lib/auth.ts` | NextAuth dengan CredentialsProvider (login via email **atau** NIS), sesi JWT, token berisi `id`, `role`, `nama` |
 | `lib/prisma.ts` | PrismaClient singleton (mencegah koneksi ganda saat hot-reload dev) |
 
@@ -640,7 +640,7 @@ cp .env.example .env
 npm run dev
 ```
 
-Buka **http://localhost:3000**
+Buka **http://localhost:3001**
 
 ### Script NPM yang Tersedia
 

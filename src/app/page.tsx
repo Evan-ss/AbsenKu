@@ -15,6 +15,8 @@ export default function HomePage() {
         router.push("/admin/dashboard");
       } else if (session.user.role === "SISWA") {
         router.push("/siswa/dashboard");
+      } else if (session.user.role === "GURU") {
+        router.push("/guru/dashboard");
       }
     }
   }, [session, status, router]);

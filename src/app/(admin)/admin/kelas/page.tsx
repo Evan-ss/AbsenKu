@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { useSweetAlert } from "@/components/sweet-alert";
 
 interface Kelas {
   id: string;
@@ -13,6 +14,7 @@ interface Kelas {
 const emptyForm = { namaKelas: "", waliKelas: "" };
 
 export default function KelasPage() {
+  const { showAlert } = useSweetAlert();
   const [kelasList, setKelasList] = useState<Kelas[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -116,7 +118,7 @@ export default function KelasPage() {
       setDeleteTarget(null);
       fetchKelas();
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Gagal menghapus");
+      showAlert({ title: "Gagal", message: err instanceof Error ? err.message : "Gagal menghapus", type: "error" });
     } finally {
       setDeleting(false);
     }

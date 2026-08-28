@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from "react";
 import FaceCapture from "@/components/face-capture";
+import { useSweetAlert } from "@/components/sweet-alert";
 
 // Types
 interface Kelas {
@@ -46,6 +47,7 @@ const emptyForm: SiswaFormData = {
 };
 
 export default function SiswaPage() {
+  const { showAlert } = useSweetAlert();
   // State
   const [siswaList, setSiswaList] = useState<Siswa[]>([]);
   const [kelasList, setKelasList] = useState<Kelas[]>([]);
@@ -207,7 +209,7 @@ export default function SiswaPage() {
       setDeleteTarget(null);
       fetchSiswa();
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Gagal menghapus");
+      showAlert({ title: "Gagal", message: err instanceof Error ? err.message : "Gagal menghapus", type: "error" });
     } finally {
       setDeleting(false);
     }
@@ -224,7 +226,7 @@ export default function SiswaPage() {
       if (!res.ok) throw new Error("Gagal mengubah status");
       fetchSiswa();
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Gagal mengubah status");
+      showAlert({ title: "Gagal", message: err instanceof Error ? err.message : "Gagal mengubah status", type: "error" });
     }
   };
 
@@ -709,7 +711,7 @@ export default function SiswaPage() {
                   onChange={(e) =>
                     setForm({ ...form, email: e.target.value })
                   }
-                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors text-sm"
+                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors text-sm text-gray-900"
                   placeholder="email@sekolah.com"
                 />
               </div>

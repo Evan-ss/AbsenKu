@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useSession } from "next-auth/react";
+import { formatDateLong, formatTime } from "@/lib/format";
 
 interface Absensi {
   id: string;
@@ -51,24 +52,7 @@ const STATUS_DOT: Record<string, string> = {
   ALPA: "bg-red-500",
 };
 
-function formatDate(dateStr: string) {
-  const d = new Date(dateStr);
-  return d.toLocaleDateString("id-ID", {
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-  });
-}
 
-function formatTime(dateStr: string | null) {
-  if (!dateStr) return "—";
-  const d = new Date(dateStr);
-  return d.toLocaleTimeString("id-ID", {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
 
 function getMonthOptions() {
   const months = [
@@ -297,7 +281,7 @@ export default function RiwayatPage() {
                   {absensiList.map((a) => (
                     <tr key={a.id} className="hover:bg-gray-50 transition-colors">
                       <td className="px-4 py-3">
-                        <span className="text-sm text-gray-900">{formatDate(a.tanggal)}</span>
+                        <span className="text-sm text-gray-900">{formatDateLong(a.tanggal)}</span>
                       </td>
                       <td className="px-4 py-3">
                         <span className="text-sm text-gray-600">{formatTime(a.waktuMasuk)}</span>
@@ -327,7 +311,7 @@ export default function RiwayatPage() {
                   <div className="flex items-start justify-between mb-2">
                     <div>
                       <p className="text-sm font-medium text-gray-900">
-                        {formatDate(a.tanggal)}
+                        {formatDateLong(a.tanggal)}
                       </p>
                       <div className="flex gap-3 mt-1 text-xs text-gray-500">
                         <span>Masuk: {formatTime(a.waktuMasuk)}</span>

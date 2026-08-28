@@ -69,7 +69,7 @@ npm run setup
 npm run dev
 ```
 
-Buka [http://localhost:3000](http://localhost:3000)
+Buka [http://localhost:3001](http://localhost:3001)
 
 ### Login Default (setelah seed)
 
@@ -101,7 +101,7 @@ src/
 ├── components/        → providers, face-camera, face-capture
 ├── lib/               → auth, prisma, validations
 ├── types/             → next-auth type declarations
-└── middleware.ts      → Role-based route protection
+└── proxy.ts            → Role-based route protection
 ```
 
 ## 🔐 Route Protection
@@ -154,4 +154,4 @@ git push -u origin main
 |---|---|---|
 | `DATABASE_URL` | Koneksi MySQL | `mysql://root:@localhost:3306/absensi_siswa` |
 | `NEXTAUTH_SECRET` | Secret JWT (generate: `openssl rand -base64 32`) | `your-secret-key` |
-| `NEXTAUTH_URL` | URL aplikasi | `http://localhost:3000` |
+| `NEXTAUTH_URL` | URL aplikasi | `http://localhost:3001` |

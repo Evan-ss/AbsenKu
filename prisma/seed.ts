@@ -66,11 +66,70 @@ async function main() {
 
   console.log(`✅ ${kelasList.length} classes created`);
 
+  // Create default guru
+  const guruPassword = await bcrypt.hash("guru123", 10);
+
+  const guru = await prisma.user.upsert({
+    where: { email: "guru@sekolah.com" },
+    update: {},
+    create: {
+      nama: "Guru Wali Kelas",
+      nis: null,
+      email: "guru@sekolah.com",
+      password: guruPassword,
+      role: "GURU",
+    },
+  });
+
+  console.log(`✅ Guru created: ${guru.email} (password: guru123)`);
+
+  // Assign guru to first 2 classes
+  const allKelas = await prisma.kelas.findMany({ take: 2 });
+  for (const k of allKelas) {
+    await prisma.guruKelas.upsert({
+      where: { guruId_kelasId: { guruId: guru.id, kelasId: k.id } },
+      update: {},
+      create: { guruId: guru.id, kelasId: k.id },
+    });
+  }
+  console.log(`✅ Guru assigned to ${allKelas.length} classes`);
+
+  // Create sample students for first 2 classes
+  const siswaPassword = await bcrypt.hash("siswa123", 10);
+  const sampleSiswa = [
+    { nama: "Andi Pratama", nis: "001", email: "andi@sekolah.com", kelasIdx: 0 },
+    { nama: "Budi Santoso", nis: "002", email: "budi@sekolah.com", kelasIdx: 0 },
+    { nama: "Citra Dewi", nis: "003", email: "citra@sekolah.com", kelasIdx: 0 },
+    { nama: "Dian Permata", nis: "004", email: "dian@sekolah.com", kelasIdx: 1 },
+    { nama: "Eka Putri", nis: "005", email: "eka@sekolah.com", kelasIdx: 1 },
+    { nama: "Fajar Ramadhan", nis: "006", email: "fajar@sekolah.com", kelasIdx: 1 },
+  ];
+
+  for (const s of sampleSiswa) {
+    const kelas = allKelas[s.kelasIdx];
+    if (!kelas) continue;
+    await prisma.user.upsert({
+      where: { email: s.email },
+      update: {},
+      create: {
+        nama: s.nama,
+        nis: s.nis,
+        email: s.email,
+        password: siswaPassword,
+        role: "SISWA",
+        kelasId: kelas.id,
+      },
+    });
+  }
+  console.log(`✅ ${sampleSiswa.length} sample students created`);
+
   console.log("");
   console.log("🎉 Seeding complete!");
   console.log("");
   console.log("📋 Login credentials:");
-  console.log("   Admin: admin@sekolah.com / admin123");
+  console.log("   Admin : admin@sekolah.com / admin123");
+  console.log("   Guru  : guru@sekolah.com  / guru123");
+  console.log("   Siswa : andi@sekolah.com  / siswa123");
 }
 
 main()
