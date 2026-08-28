@@ -561,7 +561,7 @@ export default function GuruKelasDetailPage({
             </div>
             <form onSubmit={async (e) => {
               e.preventDefault();
-              if (!manualSiswaId) return;
+              if (!manualSiswaId || !manualKeterangan.trim()) return;
               setManualSubmitting(true);
               try {
                 const res = await fetch("/api/absen/manual", {
@@ -571,7 +571,7 @@ export default function GuruKelasDetailPage({
                     userId: manualSiswaId,
                     tanggal,
                     status: manualStatus,
-                    keterangan: manualKeterangan || undefined,
+                    keterangan: manualKeterangan.trim(),
                   }),
                 });
                 const result = await res.json();
@@ -617,18 +617,19 @@ export default function GuruKelasDetailPage({
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Keterangan (Opsional)</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Keterangan <span className="text-red-500">*</span></label>
                 <input
                   type="text"
+                  required
                   value={manualKeterangan}
                   onChange={(e) => setManualKeterangan(e.target.value)}
                   className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-amber-500 focus:border-amber-500 outline-none"
-                  placeholder="Catatan..."
+                  placeholder="Alasan absen manual..."
                 />
               </div>
               <div className="flex gap-3 pt-2">
                 <button type="button" onClick={() => setShowManualAbsen(false)} className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 text-sm font-medium transition-colors">Batal</button>
-                <button type="submit" disabled={manualSubmitting || !manualSiswaId} className="flex-1 px-4 py-2.5 bg-amber-600 hover:bg-amber-700 disabled:bg-amber-400 text-white rounded-lg text-sm font-medium transition-colors">
+                <button type="submit" disabled={manualSubmitting || !manualSiswaId || !manualKeterangan.trim()} className="flex-1 px-4 py-2.5 bg-amber-600 hover:bg-amber-700 disabled:bg-amber-400 text-white rounded-lg text-sm font-medium transition-colors">
                   {manualSubmitting ? "Memproses..." : "Catat Absen"}
                 </button>
               </div>

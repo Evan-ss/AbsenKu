@@ -102,15 +102,15 @@ export default function SiswaSuratPage() {
 
     setSubmitting(true);
     try {
+      const fd = new FormData();
+      fd.append("tanggal", tanggal);
+      fd.append("jenis", jenis);
+      fd.append("fotoSurat", fotoFile);
+      if (keterangan) fd.append("keterangan", keterangan);
+
       const res = await fetch("/api/siswa/surat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          tanggal,
-          jenis,
-          fotoSurat: fotoPreview,
-          keterangan: keterangan || undefined,
-        }),
+        body: fd,
       });
 
       const result = await res.json();

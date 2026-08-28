@@ -227,14 +227,6 @@ export default function AbsenPage() {
                 >
                   Coba Lagi ({3 - failedAttempts} tersisa)
                 </button>
-                {failedAttempts >= 2 && (
-                  <button
-                    onClick={goToManual}
-                    className="px-6 py-2 bg-amber-500 hover:bg-amber-600 rounded-lg text-sm font-medium transition-colors"
-                  >
-                    Absen Manual →
-                  </button>
-                )}
               </div>
             </div>
           )}
@@ -431,12 +423,16 @@ function ManualAbsenButton({ onDone }: { onDone: () => void }) {
   const [submitting, setSubmitting] = useState(false);
 
   const handleSubmit = async () => {
+    if (!keterangan.trim()) {
+      alert("Keterangan harus diisi!");
+      return;
+    }
     setSubmitting(true);
     try {
       const res = await fetch("/api/absen/manual", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status, keterangan: keterangan || undefined }),
+        body: JSON.stringify({ status, keterangan: keterangan.trim() }),
       });
       const result = await res.json();
       if (!res.ok) {
@@ -480,9 +476,10 @@ function ManualAbsenButton({ onDone }: { onDone: () => void }) {
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Keterangan (Opsional)</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Keterangan <span className="text-red-500">*</span></label>
                 <input
                   type="text"
+                  required
                   value={keterangan}
                   onChange={(e) => setKeterangan(e.target.value)}
                   className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-amber-500 focus:border-amber-500 outline-none"

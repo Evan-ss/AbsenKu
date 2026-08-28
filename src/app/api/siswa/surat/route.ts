@@ -2,16 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { z } from "zod";
-
-const createSuratSchema = z.object({
-  tanggal: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/, "Format tanggal YYYY-MM-DD"),
-  jenis: z.enum(["SAKIT", "IZIN"]),
-  fotoSurat: z.string().min(1, "Foto bukti harus diunggah"),
-  keterangan: z.string().max(500).optional(),
-});
+import { writeFile, mkdir } from "fs/promises";
+import path from "path";
 
 // GET /api/siswa/surat — Riwayat surat siswa yang login
 export async function GET(req: NextRequest) {
@@ -69,7 +61,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// POST /api/siswa/surat — Ajukan surat izin/sakit
+// POST /api/siswa/surat — Ajukan surat izin/sakit (multipart/form-data)
 export async function POST(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
@@ -77,17 +69,42 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
 
-    const body = await req.json();
-    const validation = createSuratSchema.safeParse(body);
+    const formData = await req.formData();
+    const tanggal = formData.get("tanggal") as string;
+    const jenis = formData.get("jenis") as string;
+    const keterangan = (formData.get("keterangan") as string) || "";
+    const fotoFile = formData.get("fotoSurat") as File | null;
 
-    if (!validation.success) {
+    // Validasi
+    if (!tanggal || !["SAKIT", "IZIN"].includes(jenis)) {
       return NextResponse.json(
-        { message: validation.error.issues[0].message },
+        { message: "Data tidak valid" },
         { status: 400 }
       );
     }
 
-    const { tanggal, jenis, fotoSurat, keterangan } = validation.data;
+    if (!fotoFile || fotoFile.size === 0) {
+      return NextResponse.json(
+        { message: "Foto bukti harus diunggah" },
+        { status: 400 }
+      );
+    }
+
+    // Validasi tipe file
+    if (!fotoFile.type.startsWith("image/")) {
+      return NextResponse.json(
+        { message: "File harus berupa gambar" },
+        { status: 400 }
+      );
+    }
+
+    // Validasi ukuran (max 5MB)
+    if (fotoFile.size > 5 * 1024 * 1024) {
+      return NextResponse.json(
+        { message: "Ukuran file maksimal 5MB" },
+        { status: 400 }
+      );
+    }
 
     // Cek apakah sudah ada surat untuk tanggal ini
     const tanggalDate = new Date(tanggal);
@@ -137,13 +154,26 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Simpan foto ke public/upload/surat/
+    const uploadDir = path.join(process.cwd(), "public", "upload", "surat");
+    await mkdir(uploadDir, { recursive: true });
+
+    const ext = fotoFile.name.split(".").pop() || "jpg";
+    const filename = `${session.user.id}_${Date.now()}.${ext}`;
+    const filepath = path.join(uploadDir, filename);
+
+    const bytes = await fotoFile.arrayBuffer();
+    await writeFile(filepath, Buffer.from(bytes));
+
+    const fotoUrl = `/upload/surat/${filename}`;
+
     // Buat surat baru
     const surat = await prisma.suratIzin.create({
       data: {
         userId: session.user.id,
         tanggal: tanggalUTC,
-        jenis,
-        fotoSurat,
+        jenis: jenis as "SAKIT" | "IZIN",
+        fotoSurat: fotoUrl,
         keterangan: keterangan || null,
         status: "MENUNGGU",
       },

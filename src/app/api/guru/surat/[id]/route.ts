@@ -22,7 +22,16 @@ export async function GET(req: NextRequest, { params }: Params) {
 
     const surat = await prisma.suratIzin.findUnique({
       where: { id },
-      include: {
+      select: {
+        id: true,
+        tanggal: true,
+        jenis: true,
+        fotoSurat: true,
+        keterangan: true,
+        status: true,
+        createdAt: true,
+        reviewedAt: true,
+        userId: true,
         user: {
           select: {
             id: true,

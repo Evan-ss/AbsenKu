@@ -162,6 +162,7 @@ export default function GuruSuratPage() {
               <table className="w-full">
                 <thead>
                   <tr className="bg-gray-50 border-b border-gray-200">
+                    <th className="text-center px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Foto</th>
                     <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Siswa</th>
                     <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Kelas</th>
                     <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Jenis</th>
@@ -174,6 +175,18 @@ export default function GuruSuratPage() {
                 <tbody className="divide-y divide-gray-100">
                   {suratList.map((surat) => (
                     <tr key={surat.id} className="hover:bg-gray-50 transition-colors">
+                      <td className="px-4 py-3">
+                        <div className="w-10 h-10 rounded-lg overflow-hidden bg-gray-100 border border-gray-200">
+                          <img
+                            src={surat.fotoSurat}
+                            alt="Bukti surat"
+                            className="w-full h-full object-cover"
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40' viewBox='0 0 40 40'%3E%3Crect fill='%23f3f4f6' width='40' height='40'/%3E%3Ctext x='50%25' y='55%25' dominant-baseline='middle' text-anchor='middle' fill='%239ca3af' font-size='12'%3E?%3C/text%3E%3C/svg%3E";
+                            }}
+                          />
+                        </div>
+                      </td>
                       <td className="px-4 py-3">
                         <p className="text-sm font-medium text-gray-900">{surat.user.nama}</p>
                         <p className="text-xs text-gray-500 font-mono">{surat.user.nis}</p>
@@ -234,16 +247,28 @@ export default function GuruSuratPage() {
                   href={`/guru/review/${surat.id}`}
                   className="block p-4 hover:bg-gray-50 transition-colors"
                 >
-                  <div className="flex items-start justify-between mb-2">
-                    <div>
-                      <p className="text-sm font-medium text-gray-900">{surat.user.nama}</p>
+                  <div className="flex items-start gap-3 mb-2">
+                    <div className="w-10 h-10 rounded-lg overflow-hidden bg-gray-100 border border-gray-200 flex-shrink-0">
+                      <img
+                        src={surat.fotoSurat}
+                        alt="Bukti surat"
+                        className="w-full h-full object-cover"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40' viewBox='0 0 40 40'%3E%3Crect fill='%23f3f4f6' width='40' height='40'/%3E%3Ctext x='50%25' y='55%25' dominant-baseline='middle' text-anchor='middle' fill='%239ca3af' font-size='12'%3E?%3C/text%3E%3C/svg%3E";
+                        }}
+                      />
+                    </div>
+                    <div className="flex-1">
+                      <div className="flex items-start justify-between">
+                        <p className="text-sm font-medium text-gray-900">{surat.user.nama}</p>
+                        <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[surat.status]}`}>
+                          {STATUS_LABELS[surat.status]}
+                        </span>
+                      </div>
                       <p className="text-xs text-gray-500">
                         {surat.user.kelas?.namaKelas} • {JENIS_LABELS[surat.jenis]}
                       </p>
                     </div>
-                    <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[surat.status]}`}>
-                      {STATUS_LABELS[surat.status]}
-                    </span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-xs text-gray-500">{formatDate(surat.tanggal)}</span>
