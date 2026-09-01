@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useSweetAlert } from "@/components/sweet-alert";
 import { formatTime } from "@/lib/format";
 import DateInput from "@/components/date-input";
+import FaceCapture from "@/components/face-capture";
 
 interface SiswaAbsensi {
   id: string;
@@ -87,6 +88,8 @@ export default function GuruKelasDetailPage({
   const [manualSubmitting, setManualSubmitting] = useState(false);
   const [exportBulan, setExportBulan] = useState(String(new Date().getMonth() + 1));
   const [exportTahun, setExportTahun] = useState(String(new Date().getFullYear()));
+  const [showFaceModal, setShowFaceModal] = useState(false);
+  const [faceSiswa, setFaceSiswa] = useState<{ id: string; nama: string } | null>(null);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -380,10 +383,28 @@ export default function GuruKelasDetailPage({
                           <p className="text-sm font-medium text-gray-900">
                             {siswa.nama}
                           </p>
-                          {!siswa.punyaWajah && (
-                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-gray-100 text-gray-500">
-                              No face
-                            </span>
+                          {!siswa.punyaWajah ? (
+                            <button
+                              onClick={() => {
+                                setFaceSiswa({ id: siswa.id, nama: siswa.nama });
+                                setShowFaceModal(true);
+                              }}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-amber-100 text-amber-700 hover:bg-amber-200 transition-colors"
+                            >
+                              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                              Rekam
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => {
+                                setFaceSiswa({ id: siswa.id, nama: siswa.nama });
+                                setShowFaceModal(true);
+                              }}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-green-100 text-green-700 hover:bg-green-200 transition-colors"
+                            >
+                              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                              Rekam Ulang
+                            </button>
                           )}
                         </div>
                       </td>
@@ -498,6 +519,18 @@ export default function GuruKelasDetailPage({
                         ? ` (+${siswa.absensi.selisihMenit} mnt)`
                         : ""}
                     </p>
+                  )}
+                  {!siswa.punyaWajah && (
+                    <button
+                      onClick={() => {
+                        setFaceSiswa({ id: siswa.id, nama: siswa.nama });
+                        setShowFaceModal(true);
+                      }}
+                      className="mt-1 inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-amber-100 text-amber-700"
+                    >
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                      Rekam Wajah
+                    </button>
                   )}
                 </div>
               ))}
@@ -634,6 +667,36 @@ export default function GuruKelasDetailPage({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+      {/* Face Recording Modal */}
+      {showFaceModal && faceSiswa && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 bg-black/50" onClick={() => { setShowFaceModal(false); setFaceSiswa(null); }} />
+          <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-md p-6 z-10">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900">Rekam Wajah</h2>
+                <p className="text-sm text-gray-500">{faceSiswa.nama}</p>
+              </div>
+              <button
+                onClick={() => { setShowFaceModal(false); setFaceSiswa(null); }}
+                className="p-2 hover:bg-gray-100 rounded-lg"
+              >
+                <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </div>
+            <FaceCapture
+              siswaId={faceSiswa.id}
+              siswaNama={faceSiswa.nama}
+              existingDescriptor={false}
+              onSaved={() => {
+                setShowFaceModal(false);
+                setFaceSiswa(null);
+                fetchData();
+              }}
+            />
           </div>
         </div>
       )}

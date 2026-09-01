@@ -19,46 +19,56 @@ function euclideanDistance(a: number[], b: number[]): number {
 const MATCH_THRESHOLD = 0.45;
 
 // Fungsi untuk menentukan status absen berdasarkan jadwal
+// Sebelum jamMulaiMasuk → HADIR (absen awal diperbolehkan)
+// Antara jamMulaiMasuk dan jamSelesaiMasuk → HADIR
+// Setelah jamSelesaiMasuk → TELAT
 async function determineStatus(
   waktuSekarang: Date
 ): Promise<"HADIR" | "TELAT"> {
-  // Format waktu ke HH:mm
   const jam = waktuSekarang.getHours().toString().padStart(2, "0");
   const menit = waktuSekarang.getMinutes().toString().padStart(2, "0");
   const waktuStr = `${jam}:${menit}`;
 
-  // Cari jadwal aktif
   const jadwal = await prisma.jadwalAbsensi.findFirst({
     where: { aktif: true },
   });
 
   if (!jadwal) {
-    // Tidak ada jadwal → default HADIR
     return "HADIR";
   }
 
+  // Sebelum jam mulai masuk → tetap HADIR (absen awal diperbolehkan)
   if (waktuStr < jadwal.jamMulaiMasuk) {
-    // Belum waktunya absen — seharusnya前端 sudah cegah, default HADIR
     return "HADIR";
   }
 
+  // Dalam rentang jam masuk → HADIR
   if (waktuStr <= jadwal.jamSelesaiMasuk) {
     return "HADIR";
   }
 
+  // Setelah jam selesai masuk → TELAT
   return "TELAT";
 }
 
 // POST /api/absen/face — Absen via Face Recognition
+// - Role SISWA: siswa absen untuk diri sendiri (backward compatibility)
+// - Role GURU: guru scan wajah siswa di kelas yang ditugaskan
+// - Role ADMIN: admin scan wajah siswa (akses semua kelas)
 export async function POST(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "SISWA") {
+    if (!session) {
+      return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    }
+
+    const role = session.user.role;
+    if (role !== "SISWA" && role !== "GURU" && role !== "ADMIN") {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
 
     const body = await req.json();
-    const { faceDescriptor } = body;
+    const { faceDescriptor, kelasId } = body;
 
     if (
       !faceDescriptor ||
@@ -71,9 +81,170 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Ambil data user yang sedang login (termasuk faceDescriptor)
-    const currentUser = await prisma.user.findUnique({
-      where: { id: session.user.id },
+    // ============================================
+    // MODE SISWA: absen untuk diri sendiri
+    // ============================================
+    if (role === "SISWA") {
+      const currentUser = await prisma.user.findUnique({
+        where: { id: session.user.id },
+        select: {
+          id: true,
+          nama: true,
+          faceDescriptor: true,
+          kelas: { select: { namaKelas: true } },
+        },
+      });
+
+      if (!currentUser) {
+        return NextResponse.json(
+          { message: "Data user tidak ditemukan" },
+          { status: 404 }
+        );
+      }
+
+      const storedDescriptor = currentUser.faceDescriptor as number[] | null;
+
+      if (!storedDescriptor || !Array.isArray(storedDescriptor) || storedDescriptor.length < 100) {
+        return NextResponse.json(
+          {
+            message: "Wajah kamu belum direkam. Silakan hubungi admin untuk merekam wajah terlebih dahulu.",
+            match: false,
+            noFaceData: true,
+          },
+          { status: 200 }
+        );
+      }
+
+      const distance = euclideanDistance(faceDescriptor, storedDescriptor);
+      const isMatch = distance < MATCH_THRESHOLD;
+
+      if (!isMatch) {
+        return NextResponse.json(
+          {
+            message: `Wajah tidak cocok (skor: ${distance.toFixed(2)}). Silakan coba lagi dengan posisi yang benar.`,
+            match: false,
+            distance,
+          },
+          { status: 200 }
+        );
+      }
+
+      const bestMatch = {
+        id: currentUser.id,
+        nama: currentUser.nama,
+        distance,
+        kelas: currentUser.kelas?.namaKelas || null,
+      };
+
+      const now = new Date();
+      const today = new Date(
+        Date.UTC(now.getFullYear(), now.getMonth(), now.getDate())
+      );
+
+      const existingAbsensi = await prisma.absensi.findUnique({
+        where: {
+          userId_tanggal: {
+            userId: currentUser.id,
+            tanggal: today,
+          },
+        },
+      });
+
+      if (existingAbsensi) {
+        return NextResponse.json(
+          {
+            message: `${currentUser.nama} sudah absen hari ini pukul ${existingAbsensi.waktuMasuk?.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }) || "—"}`,
+            match: true,
+            alreadyAbsen: true,
+            absensi: existingAbsensi,
+          },
+          { status: 200 }
+        );
+      }
+
+      const status = await determineStatus(now);
+
+      const absensi = await prisma.absensi.create({
+        data: {
+          userId: bestMatch.id,
+          tanggal: today,
+          waktuMasuk: now,
+          status,
+        },
+        select: {
+          id: true,
+          status: true,
+          waktuMasuk: true,
+        },
+      });
+
+      return NextResponse.json(
+        {
+          message: `Absen berhasil! Selamat datang, ${bestMatch.nama}`,
+          match: true,
+          distance: bestMatch.distance,
+          alreadyAbsen: false,
+          absensi: {
+            ...absensi,
+            nama: bestMatch.nama,
+            kelas: bestMatch.kelas,
+            distance: bestMatch.distance,
+          },
+        },
+        { status: 200 }
+      );
+    }
+
+    // ============================================
+    // MODE GURU/ADMIN: scan wajah siswa
+    // ============================================
+
+    // Untuk GURU: ambil kelas yang ditugaskan
+    // Untuk ADMIN: bisa akses semua kelas
+    let siswaWhere: Record<string, unknown> = {
+      role: "SISWA",
+      isActive: true,
+    };
+
+    if (role === "GURU") {
+      // Ambil ID kelas yang ditugaskan ke guru ini
+      const guruKelasList = await prisma.guruKelas.findMany({
+        where: { guruId: session.user.id },
+        select: { kelasId: true },
+      });
+
+      const kelasIds = guruKelasList.map((gk) => gk.kelasId);
+
+      if (kelasIds.length === 0) {
+        return NextResponse.json(
+          { message: "Anda belum ditugaskan di kelas mana pun" },
+          { status: 403 }
+        );
+      }
+
+      // Jika kelasId spesifik diminta, validasi guru ditugaskan di kelas itu
+      if (kelasId) {
+        if (!kelasIds.includes(kelasId)) {
+          return NextResponse.json(
+            { message: "Anda tidak ditugaskan di kelas ini" },
+            { status: 403 }
+          );
+        }
+        siswaWhere.kelasId = kelasId;
+      } else {
+        // Scan semua kelas yang ditugaskan
+        siswaWhere.kelasId = { in: kelasIds };
+      }
+    } else if (role === "ADMIN") {
+      // Admin bisa filter per kelas atau semua
+      if (kelasId) {
+        siswaWhere.kelasId = kelasId;
+      }
+    }
+
+    // Ambil semua siswa di kelas yang ditugaskan
+    const allSiswa = await prisma.user.findMany({
+      where: siswaWhere,
       select: {
         id: true,
         nama: true,
@@ -82,19 +253,16 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    if (!currentUser) {
-      return NextResponse.json(
-        { message: "Data user tidak ditemukan" },
-        { status: 404 }
-      );
-    }
+    // Filter hanya yang punya face descriptor valid
+    const siswaList = allSiswa.filter((s) => {
+      const fd = s.faceDescriptor;
+      return fd !== null && fd !== undefined && Array.isArray(fd) && (fd as number[]).length >= 100;
+    });
 
-    const storedDescriptor = currentUser.faceDescriptor as number[] | null;
-
-    if (!storedDescriptor || !Array.isArray(storedDescriptor) || storedDescriptor.length < 100) {
+    if (siswaList.length === 0) {
       return NextResponse.json(
         {
-          message: "Wajah kamu belum direkam. Silakan hubungi admin untuk merekam wajah terlebih dahulu.",
+          message: "Tidak ada siswa dengan data wajah yang terdaftar",
           match: false,
           noFaceData: true,
         },
@@ -102,39 +270,33 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Bandingkan HANYA dengan wajah user yang sedang login (bukan semua siswa)
-    // Ini mencegah: user A login pakai akun B, tapi absen pakai wajah A
-    const distance = euclideanDistance(faceDescriptor, storedDescriptor);
-    const isMatch = distance < MATCH_THRESHOLD;
+    // Bandingkan dengan SEMUA siswa, cari yang paling cocok
+    let bestDistance = Infinity;
+    let bestSiswa: (typeof siswaList)[number] | null = null;
 
-    if (!isMatch) {
+    for (const siswa of siswaList) {
+      const storedDescriptor = siswa.faceDescriptor as number[];
+      if (!Array.isArray(storedDescriptor) || storedDescriptor.length < 100) continue;
+
+      const distance = euclideanDistance(faceDescriptor, storedDescriptor);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        bestSiswa = siswa;
+      }
+    }
+
+    if (!bestSiswa || bestDistance >= MATCH_THRESHOLD) {
       return NextResponse.json(
         {
-          message: `Wajah tidak cocok (skor: ${distance.toFixed(2)}). Silakan coba lagi dengan posisi yang benar.`,
+          message: `Wajah tidak dikenali (skor terbaik: ${bestDistance === Infinity ? "∞" : bestDistance.toFixed(2)}). Silakan coba lagi.`,
           match: false,
-          distance,
+          distance: bestDistance === Infinity ? null : bestDistance,
         },
         { status: 200 }
       );
     }
 
-    const bestMatch = {
-      id: currentUser.id,
-      nama: currentUser.nama,
-      distance,
-      kelas: currentUser.kelas?.namaKelas || null,
-    };
-
-    // Cek apakah sudah absen hari ini (pakai user ID yang login)
-    // PENTING: pakai Date.UTC, BUKAN new Date(y,m,d) (local midnight).
-    // Kolom `tanggal` di MySQL bertipe DATE dan Prisma men-serialize nilai
-    // tanggal berdasarkan bagian UTC. Kalau kita kirim local midnight
-    // (mis. 2026-08-04 00:00 WIB = 2026-08-03T17:00Z), maka:
-    //   - INSERT menyimpan '2026-08-03' (tanggal UTC)
-    //   - findUnique mencari '2026-08-04' (tanggal lokal)
-    // Keduanya berbeda → cek "sudah absen" selalu NULL → insert kedua
-    // menabrak unique constraint (P2002) → error 500.
-    // Dengan Date.UTC, insert & cek sama-sama memakai 'YYYY-MM-DD' lokal.
+    // Wajah cocok! Cek apakah sudah absen hari ini
     const now = new Date();
     const today = new Date(
       Date.UTC(now.getFullYear(), now.getMonth(), now.getDate())
@@ -143,7 +305,7 @@ export async function POST(req: NextRequest) {
     const existingAbsensi = await prisma.absensi.findUnique({
       where: {
         userId_tanggal: {
-          userId: currentUser.id,
+          userId: bestSiswa.id,
           tanggal: today,
         },
       },
@@ -152,10 +314,16 @@ export async function POST(req: NextRequest) {
     if (existingAbsensi) {
       return NextResponse.json(
         {
-          message: `Kamu sudah absen hari ini pukul ${existingAbsensi.waktuMasuk?.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }) || "—"}`,
+          message: `${bestSiswa.nama} sudah absen hari ini pukul ${existingAbsensi.waktuMasuk?.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }) || "—"}`,
           match: true,
           alreadyAbsen: true,
-          absensi: existingAbsensi,
+          distance: bestDistance,
+          absensi: {
+            ...existingAbsensi,
+            nama: bestSiswa.nama,
+            kelas: bestSiswa.kelas?.namaKelas || null,
+            distance: bestDistance,
+          },
         },
         { status: 200 }
       );
@@ -167,7 +335,7 @@ export async function POST(req: NextRequest) {
     // Catat absensi
     const absensi = await prisma.absensi.create({
       data: {
-        userId: bestMatch.id,
+        userId: bestSiswa.id,
         tanggal: today,
         waktuMasuk: now,
         status,
@@ -181,15 +349,15 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json(
       {
-        message: `Absen berhasil! Selamat datang, ${bestMatch.nama}`,
+        message: `Absen berhasil! ${bestSiswa.nama} — ${status === "HADIR" ? "Hadir" : "Terlambat"}`,
         match: true,
-        distance: bestMatch.distance,
+        distance: bestDistance,
         alreadyAbsen: false,
         absensi: {
           ...absensi,
-          nama: bestMatch.nama,
-          kelas: bestMatch.kelas,
-          distance: bestMatch.distance,
+          nama: bestSiswa.nama,
+          kelas: bestSiswa.kelas?.namaKelas || null,
+          distance: bestDistance,
         },
       },
       { status: 200 }

@@ -6,10 +6,12 @@ import { authOptions } from "@/lib/auth";
 type Params = { params: Promise<{ id: string }> };
 
 // POST /api/siswa/[id]/face — Save face descriptor for a student
+// - Role ADMIN: bisa rekam wajah semua siswa
+// - Role GURU: bisa rekam wajah siswa di kelas yang ditugaskan
 export async function POST(req: NextRequest, { params }: Params) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "ADMIN") {
+    if (!session || (session.user.role !== "ADMIN" && session.user.role !== "GURU")) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
 
@@ -22,6 +24,24 @@ export async function POST(req: NextRequest, { params }: Params) {
         { message: "Siswa tidak ditemukan" },
         { status: 404 }
       );
+    }
+
+    // Jika GURU, pastikan siswa di kelas yang ditugaskan
+    if (session.user.role === "GURU" && siswa.kelasId) {
+      const guruKelas = await prisma.guruKelas.findUnique({
+        where: {
+          guruId_kelasId: {
+            guruId: session.user.id,
+            kelasId: siswa.kelasId,
+          },
+        },
+      });
+      if (!guruKelas) {
+        return NextResponse.json(
+          { message: "Anda tidak ditugaskan di kelas siswa ini" },
+          { status: 403 }
+        );
+      }
     }
 
     const body = await req.json();
