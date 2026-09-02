@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
+import { writeFile, mkdir } from "fs/promises";
+import path from "path";
 
 // Fungsi untuk menghitung Euclidean distance antara dua face descriptor
 function euclideanDistance(a: number[], b: number[]): number {
@@ -17,6 +19,35 @@ function euclideanDistance(a: number[], b: number[]): number {
 // 0.45 = ketat (hanya wajah yang sangat mirip)
 // face-api.js Euclidean distance: 0.0-0.4 = sangat cocok, 0.4-0.5 = cocok, >0.5 = berbeda
 const MATCH_THRESHOLD = 0.45;
+
+// Simpan foto wajah dari data URL ke public/upload/face/
+async function saveFacePhoto(
+  fotoWajah: string,
+  userId: string
+): Promise<string | null> {
+  try {
+    // Parse data URL: data:image/jpeg;base64,...
+    const matches = fotoWajah.match(/^data:image\/(\w+);base64,(.+)$/);
+    if (!matches) return null;
+
+    const ext = matches[1] === "jpeg" ? "jpg" : matches[1];
+    const base64Data = matches[2];
+
+    const uploadDir = path.join(process.cwd(), "public", "upload", "face");
+    await mkdir(uploadDir, { recursive: true });
+
+    const filename = `${userId}_${Date.now()}.${ext}`;
+    const filepath = path.join(uploadDir, filename);
+
+    const buffer = Buffer.from(base64Data, "base64");
+    await writeFile(filepath, buffer);
+
+    return `/upload/face/${filename}`;
+  } catch (err) {
+    console.error("Error saving face photo:", err);
+    return null;
+  }
+}
 
 // Fungsi untuk menentukan status absen berdasarkan jadwal
 // Sebelum jamMulaiMasuk → HADIR (absen awal diperbolehkan)
@@ -68,7 +99,7 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { faceDescriptor, kelasId } = body;
+    const { faceDescriptor, kelasId, fotoWajah } = body;
 
     if (
       !faceDescriptor ||
@@ -164,19 +195,49 @@ export async function POST(req: NextRequest) {
 
       const status = await determineStatus(now);
 
-      const absensi = await prisma.absensi.create({
-        data: {
-          userId: bestMatch.id,
-          tanggal: today,
-          waktuMasuk: now,
-          status,
-        },
-        select: {
-          id: true,
-          status: true,
-          waktuMasuk: true,
-        },
-      });
+      // Simpan foto wajah jika ada
+      let fotoWajahPath: string | null = null;
+      if (fotoWajah) {
+        fotoWajahPath = await saveFacePhoto(fotoWajah, bestMatch.id);
+      }
+
+      let absensi;
+      try {
+        absensi = await prisma.absensi.create({
+          data: {
+            userId: bestMatch.id,
+            tanggal: today,
+            waktuMasuk: now,
+            status,
+            fotoWajah: fotoWajahPath,
+          },
+          select: {
+            id: true,
+            status: true,
+            waktuMasuk: true,
+            fotoWajah: true,
+          },
+        });
+      } catch (e: unknown) {
+        // P2002 = unique constraint — sudah ada absensi untuk user+tanggal ini
+        if (e && typeof e === "object" && "code" in e && (e as { code: string }).code === "P2002") {
+          const existing = await prisma.absensi.findUnique({
+            where: {
+              userId_tanggal: { userId: bestMatch.id, tanggal: today },
+            },
+          });
+          return NextResponse.json(
+            {
+              message: `${bestMatch.nama} sudah absen hari ini pukul ${existing?.waktuMasuk?.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }) || "—"}`,
+              match: true,
+              alreadyAbsen: true,
+              absensi: existing,
+            },
+            { status: 200 }
+          );
+        }
+        throw e;
+      }
 
       return NextResponse.json(
         {
@@ -332,20 +393,56 @@ export async function POST(req: NextRequest) {
     // Tentukan status (HADIR / TELAT)
     const status = await determineStatus(now);
 
+    // Simpan foto wajah jika ada
+    let fotoWajahPath: string | null = null;
+    if (fotoWajah) {
+      fotoWajahPath = await saveFacePhoto(fotoWajah, bestSiswa.id);
+    }
+
     // Catat absensi
-    const absensi = await prisma.absensi.create({
-      data: {
-        userId: bestSiswa.id,
-        tanggal: today,
-        waktuMasuk: now,
-        status,
-      },
-      select: {
-        id: true,
-        status: true,
-        waktuMasuk: true,
-      },
-    });
+    let absensi;
+    try {
+      absensi = await prisma.absensi.create({
+        data: {
+          userId: bestSiswa.id,
+          tanggal: today,
+          waktuMasuk: now,
+          status,
+          fotoWajah: fotoWajahPath,
+        },
+        select: {
+          id: true,
+          status: true,
+          waktuMasuk: true,
+          fotoWajah: true,
+        },
+      });
+    } catch (e: unknown) {
+      // P2002 = unique constraint — sudah ada absensi untuk user+tanggal ini
+      if (e && typeof e === "object" && "code" in e && (e as { code: string }).code === "P2002") {
+        const existing = await prisma.absensi.findUnique({
+          where: {
+            userId_tanggal: { userId: bestSiswa.id, tanggal: today },
+          },
+        });
+        return NextResponse.json(
+          {
+            message: `${bestSiswa.nama} sudah absen hari ini pukul ${existing?.waktuMasuk?.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }) || "—"}`,
+            match: true,
+            alreadyAbsen: true,
+            distance: bestDistance,
+            absensi: {
+              ...existing,
+              nama: bestSiswa.nama,
+              kelas: bestSiswa.kelas?.namaKelas || null,
+              distance: bestDistance,
+            },
+          },
+          { status: 200 }
+        );
+      }
+      throw e;
+    }
 
     return NextResponse.json(
       {

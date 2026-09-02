@@ -19,6 +19,7 @@ interface SiswaAbsensi {
     waktuMasuk: Date | null;
     waktuPulang: Date | null;
     keterangan: string | null;
+    fotoWajah: string | null;
     selisihMenit: number | null;
   } | null;
 }
@@ -90,6 +91,42 @@ export default function GuruKelasDetailPage({
   const [exportTahun, setExportTahun] = useState(String(new Date().getFullYear()));
   const [showFaceModal, setShowFaceModal] = useState(false);
   const [faceSiswa, setFaceSiswa] = useState<{ id: string; nama: string } | null>(null);
+  const [activeTab, setActiveTab] = useState<"absensi" | "foto">("absensi");
+  const [selectedPhoto, setSelectedPhoto] = useState<{ url: string; nama: string; waktu: string; tanggal: string } | null>(null);
+
+  // Format tanggal ke Bahasa Indonesia
+  const formatTanggalIndo = (dateStr: string) => {
+    const d = new Date(dateStr + "T00:00:00");
+    return d.toLocaleDateString("id-ID", {
+      weekday: "long",
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    });
+  };
+
+  // Cek apakah tanggal yang dipilih adalah hari ini
+  const isToday = (() => {
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    return tanggal === today;
+  })();
+
+  // Navigasi tanggal
+  const goToPrevDay = () => {
+    const d = new Date(tanggal + "T00:00:00");
+    d.setDate(d.getDate() - 1);
+    setTanggal(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`);
+  };
+  const goToNextDay = () => {
+    const d = new Date(tanggal + "T00:00:00");
+    d.setDate(d.getDate() + 1);
+    setTanggal(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`);
+  };
+  const goToToday = () => {
+    const now = new Date();
+    setTanggal(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`);
+  };
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -288,8 +325,47 @@ export default function GuruKelasDetailPage({
             </div>
           )}
 
+          {/* Tab Navigation */}
+          <div className="flex gap-1 mb-6 bg-gray-100 p-1 rounded-xl w-fit">
+            <button
+              onClick={() => setActiveTab("absensi")}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                activeTab === "absensi"
+                  ? "bg-white text-gray-900 shadow-sm"
+                  : "text-gray-500 hover:text-gray-700"
+              }`}
+            >
+              <span className="flex items-center gap-2">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                </svg>
+                Absensi
+              </span>
+            </button>
+            <button
+              onClick={() => setActiveTab("foto")}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                activeTab === "foto"
+                  ? "bg-white text-gray-900 shadow-sm"
+                  : "text-gray-500 hover:text-gray-700"
+              }`}
+            >
+              <span className="flex items-center gap-2">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+                Foto Wajah
+                {siswaList.filter(s => s.absensi?.fotoWajah).length > 0 && (
+                  <span className="ml-1 px-1.5 py-0.5 bg-emerald-100 text-emerald-700 rounded-full text-[10px]">
+                    {siswaList.filter(s => s.absensi?.fotoWajah).length}
+                  </span>
+                )}
+              </span>
+            </button>
+          </div>
+
           {/* Action Bar */}
-          {summary && summary.belumAbsen > 0 && (
+          {activeTab === "absensi" && summary && summary.belumAbsen > 0 && (
             <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
               <div>
                 <p className="text-sm font-medium text-amber-900">
@@ -322,7 +398,171 @@ export default function GuruKelasDetailPage({
             </div>
           )}
 
+          {/* Face Photo Gallery */}
+          {activeTab === "foto" && (
+            <div className="bg-white rounded-xl border border-gray-200 p-6">
+              {/* Header dengan navigasi tanggal */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900">
+                    Foto Wajah Siswa
+                  </h3>
+                  <p className="text-sm text-gray-500 mt-0.5">
+                    {formatTanggalIndo(tanggal)}
+                  </p>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={goToPrevDay}
+                    className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                    title="Hari sebelumnya"
+                  >
+                    <svg className="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                    </svg>
+                  </button>
+                  {!isToday && (
+                    <button
+                      onClick={goToToday}
+                      className="px-3 py-1.5 text-xs font-medium text-amber-700 bg-amber-50 hover:bg-amber-100 rounded-lg transition-colors"
+                    >
+                      Hari Ini
+                    </button>
+                  )}
+                  {isToday && (
+                    <span className="px-3 py-1.5 text-xs font-medium text-emerald-700 bg-emerald-50 rounded-lg">
+                      Hari Ini
+                    </span>
+                  )}
+                  <button
+                    onClick={goToNextDay}
+                    className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                    title="Hari berikutnya"
+                  >
+                    <svg className="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+              {/* Stats Ringkasan */}
+              {(() => {
+                const totalFoto = siswaList.filter(s => s.absensi?.fotoWajah).length;
+                const totalSiswa = siswaList.length;
+                const sudahAbsen = siswaList.filter(s => s.absensi).length;
+                const persenFoto = totalSiswa > 0 ? Math.round((totalFoto / totalSiswa) * 100) : 0;
+                const fotoHadir = siswaList.filter(s => s.absensi?.fotoWajah && s.absensi?.status === "HADIR").length;
+                const fotoTelat = siswaList.filter(s => s.absensi?.fotoWajah && s.absensi?.status === "TELAT").length;
+                return totalFoto > 0 ? (
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+                    <div className="bg-gray-50 rounded-xl p-3 text-center">
+                      <p className="text-2xl font-bold text-gray-900">{totalFoto}</p>
+                      <p className="text-[11px] text-gray-500">Foto Tersimpan</p>
+                    </div>
+                    <div className="bg-gray-50 rounded-xl p-3 text-center">
+                      <p className="text-2xl font-bold text-amber-600">{totalSiswa - sudahAbsen}</p>
+                      <p className="text-[11px] text-gray-500">Belum Absen</p>
+                    </div>
+                    <div className="bg-gray-50 rounded-xl p-3 text-center">
+                      <p className="text-2xl font-bold text-green-600">{fotoHadir}</p>
+                      <p className="text-[11px] text-gray-500">Foto Hadir</p>
+                    </div>
+                    <div className="bg-gray-50 rounded-xl p-3 text-center">
+                      <p className="text-2xl font-bold text-yellow-600">{fotoTelat}</p>
+                      <p className="text-[11px] text-gray-500">Foto Telat</p>
+                    </div>
+                  </div>
+                ) : null;
+              })()}
+
+              {/* Progress bar */}
+              {siswaList.length > 0 && (
+                <div className="mb-5">
+                  <div className="flex items-center justify-between text-xs text-gray-500 mb-1.5">
+                    <span>Foto wajah terekam</span>
+                    <span className="font-semibold text-gray-700">
+                      {siswaList.filter(s => s.absensi?.fotoWajah).length}/{siswaList.length} siswa
+                    </span>
+                  </div>
+                  <div className="w-full bg-gray-100 rounded-full h-2">
+                    <div
+                      className={`h-2 rounded-full transition-all duration-500 ${
+                        siswaList.filter(s => s.absensi?.fotoWajah).length === siswaList.length
+                          ? "bg-emerald-500"
+                          : siswaList.filter(s => s.absensi?.fotoWajah).length > siswaList.length / 2
+                          ? "bg-amber-500"
+                          : "bg-red-500"
+                      }`}
+                      style={{ width: `${siswaList.length > 0 ? (siswaList.filter(s => s.absensi?.fotoWajah).length / siswaList.length) * 100 : 0}%` }}
+                    />
+                  </div>
+                  <p className="text-[11px] text-gray-400 mt-1">
+                    {Math.round((siswaList.filter(s => s.absensi?.fotoWajah).length / siswaList.length) * 100)}% dari {siswaList.length} siswa memiliki foto
+                  </p>
+                </div>
+              )}
+
+              {siswaList.filter(s => s.absensi?.fotoWajah).length === 0 ? (
+                <div className="text-center py-12">
+                  <svg className="w-12 h-12 text-gray-300 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                  </svg>
+                  <p className="text-gray-500">Belum ada foto wajah yang tersimpan</p>
+                  <p className="text-sm text-gray-400 mt-1">
+                    {isToday
+                      ? "Foto akan tersimpan saat siswa absen melalui face recognition"
+                      : `Tidak ada foto wajah pada ${formatTanggalIndo(tanggal)}`}
+                  </p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                  {siswaList
+                    .filter(s => s.absensi?.fotoWajah)
+                    .map(siswa => (
+                      <div
+                        key={siswa.id}
+                        className="group relative bg-gray-50 rounded-xl overflow-hidden border border-gray-200 hover:border-amber-300 hover:shadow-md transition-all cursor-pointer"
+                        onClick={() => setSelectedPhoto({
+                          url: siswa.absensi!.fotoWajah!,
+                          nama: siswa.nama,
+                          waktu: siswa.absensi!.waktuMasuk
+                            ? new Date(siswa.absensi!.waktuMasuk).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })
+                            : "—",
+                          tanggal: formatTanggalIndo(tanggal),
+                        })}
+                      >
+                        <div className="aspect-square">
+                          <img
+                            src={siswa.absensi!.fotoWajah!}
+                            alt={`Foto ${siswa.nama}`}
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                        <div className="p-2">
+                          <p className="text-xs font-medium text-gray-900 truncate">{siswa.nama}</p>
+                          <p className="text-[10px] text-gray-500">
+                            {siswa.absensi!.waktuMasuk
+                              ? new Date(siswa.absensi!.waktuMasuk).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })
+                              : "—"}
+                            {" • "}
+                            <span className={`font-medium ${
+                              siswa.absensi!.status === "HADIR" ? "text-green-600" : "text-yellow-600"
+                            }`}>
+                              {siswa.absensi!.status === "HADIR" ? "Hadir" : "Telat"}
+                            </span>
+                          </p>
+                        </div>
+                        {/* Hover overlay */}
+                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors" />
+                      </div>
+                    ))}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Table */}
+          {activeTab === "absensi" && (
           <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
             <div className="hidden md:block overflow-x-auto">
               <table className="w-full">
@@ -469,6 +709,34 @@ export default function GuruKelasDetailPage({
 
             {/* Mobile cards */}
             <div className="md:hidden divide-y divide-gray-100">
+              {/* Mobile select all */}
+              {summary && summary.belumAbsen > 0 && (
+                <div className="px-4 py-3 bg-gray-50 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="checkbox"
+                      checked={
+                        selectedSiswa.size ===
+                        siswaList.filter((s) => !s.absensi).length
+                      }
+                      onChange={toggleSelectAll}
+                      className="rounded border-gray-300 text-amber-600 focus:ring-amber-500"
+                    />
+                    <span className="text-sm text-gray-600">
+                      Pilih semua ({siswaList.filter((s) => !s.absensi).length} belum absen)
+                    </span>
+                  </div>
+                  {selectedSiswa.size > 0 && (
+                    <button
+                      onClick={() => handleMarkAlpa(false)}
+                      disabled={marking}
+                      className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-medium"
+                    >
+                      Tandai ALPA ({selectedSiswa.size})
+                    </button>
+                  )}
+                </div>
+              )}
               {siswaList.map((siswa) => (
                 <div
                   key={siswa.id}
@@ -477,13 +745,24 @@ export default function GuruKelasDetailPage({
                   }`}
                 >
                   <div className="flex items-start justify-between mb-2">
-                    <div>
-                      <p className="text-sm font-medium text-gray-900">
-                        {siswa.nama}
-                      </p>
-                      <p className="text-xs text-gray-500 font-mono">
-                        NIS: {siswa.nis}
-                      </p>
+                    <div className="flex items-center gap-3">
+                      {/* Mobile checkbox */}
+                      {summary && summary.belumAbsen > 0 && !siswa.absensi && (
+                        <input
+                          type="checkbox"
+                          checked={selectedSiswa.has(siswa.id)}
+                          onChange={() => toggleSelect(siswa.id)}
+                          className="rounded border-gray-300 text-amber-600 focus:ring-amber-500 mt-0.5"
+                        />
+                      )}
+                      <div>
+                        <p className="text-sm font-medium text-gray-900">
+                          {siswa.nama}
+                        </p>
+                        <p className="text-xs text-gray-500 font-mono">
+                          NIS: {siswa.nis}
+                        </p>
+                      </div>
                     </div>
                     <div className="flex items-center gap-1">
                     {siswa.absensi ? (
@@ -536,6 +815,7 @@ export default function GuruKelasDetailPage({
               ))}
             </div>
           </div>
+          )}
         </>
       )}
 
@@ -697,6 +977,43 @@ export default function GuruKelasDetailPage({
                 fetchData();
               }}
             />
+          </div>
+        </div>
+      )}
+
+      {/* Photo Preview Modal */}
+      {selectedPhoto && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            className="fixed inset-0 bg-black/70"
+            onClick={() => setSelectedPhoto(null)}
+          />
+          <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-lg p-4 z-10">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">
+                  {selectedPhoto.nama}
+                </h3>
+                <p className="text-sm text-gray-500">
+                  {selectedPhoto.tanggal} — {selectedPhoto.waktu}
+                </p>
+              </div>
+              <button
+                onClick={() => setSelectedPhoto(null)}
+                className="p-2 hover:bg-gray-100 rounded-lg"
+              >
+                <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="rounded-xl overflow-hidden bg-gray-100">
+              <img
+                src={selectedPhoto.url}
+                alt={`Foto ${selectedPhoto.nama}`}
+                className="w-full h-auto object-contain max-h-[70vh]"
+              />
+            </div>
           </div>
         </div>
       )}

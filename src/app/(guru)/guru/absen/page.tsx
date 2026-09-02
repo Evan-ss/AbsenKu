@@ -79,7 +79,7 @@ export default function GuruAbsenPage() {
 
   // Handle face captured — auto-submit after countdown finishes
   const handleFaceDetected = useCallback(
-    async (descriptor: number[]) => {
+    async (descriptor: number[], photo?: string) => {
       if (submitting) return;
       setSubmitting(true);
       setStep("scanning");
@@ -91,6 +91,7 @@ export default function GuruAbsenPage() {
           body: JSON.stringify({
             faceDescriptor: descriptor,
             kelasId: selectedKelasId || undefined,
+            fotoWajah: photo || undefined,
           }),
         });
 

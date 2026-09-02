@@ -76,6 +76,7 @@ export async function GET(req: NextRequest, { params }: Params) {
         waktuMasuk: true,
         waktuPulang: true,
         keterangan: true,
+        fotoWajah: true,
       },
     });
 
@@ -88,6 +89,7 @@ export async function GET(req: NextRequest, { params }: Params) {
         waktuMasuk: Date | null;
         waktuPulang: Date | null;
         keterangan: string | null;
+        fotoWajah: string | null;
       }
     > = {};
     for (const a of absensiList) {
@@ -97,6 +99,7 @@ export async function GET(req: NextRequest, { params }: Params) {
         waktuMasuk: a.waktuMasuk,
         waktuPulang: a.waktuPulang,
         keterangan: a.keterangan,
+        fotoWajah: a.fotoWajah,
       };
     }
 
@@ -130,10 +133,12 @@ export async function GET(req: NextRequest, { params }: Params) {
         punyaWajah: !!siswa.faceDescriptor,
         absensi: absensi
           ? {
+              id: absensi.id,
               status: absensi.status,
               waktuMasuk: absensi.waktuMasuk,
               waktuPulang: absensi.waktuPulang,
               keterangan: absensi.keterangan,
+              fotoWajah: absensi.fotoWajah,
               selisihMenit,
             }
           : null,

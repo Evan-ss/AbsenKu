@@ -121,6 +121,7 @@ model Absensi {
   waktuPulang DateTime?
   status      StatusAbsensi @default(HADIR)
   keterangan  String?
+  fotoWajah   String?       @db.VarChar(500)
   createdAt   DateTime      @default(now())
 
   @@unique([userId, tanggal])

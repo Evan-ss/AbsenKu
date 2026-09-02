@@ -136,7 +136,7 @@ function drawFaceGuide(
 }
 
 interface FaceCameraProps {
-  onFaceDetected: (descriptor: number[]) => void;
+  onFaceDetected: (descriptor: number[], photo?: string) => void;
   onDetectionUpdate?: (result: {
     detected: boolean;
     confidence: number;
@@ -347,9 +347,26 @@ export default function FaceCamera({
         countdownRef.current = null;
         setCountdown(null);
 
-        // Fire the face detected callback with stored descriptor
+        // Capture photo frame from video before clearing descriptor
+        let photoData: string | undefined;
+        if (videoRef.current) {
+          try {
+            const photoCanvas = document.createElement("canvas");
+            photoCanvas.width = videoRef.current.videoWidth;
+            photoCanvas.height = videoRef.current.videoHeight;
+            const photoCtx = photoCanvas.getContext("2d");
+            if (photoCtx) {
+              photoCtx.drawImage(videoRef.current, 0, 0);
+              photoData = photoCanvas.toDataURL("image/jpeg", 0.7);
+            }
+          } catch {
+            // Photo capture failed, continue without photo
+          }
+        }
+
+        // Fire the face detected callback with stored descriptor and photo
         if (descriptorRef.current) {
-          onFaceDetected(descriptorRef.current);
+          onFaceDetected(descriptorRef.current, photoData);
           descriptorRef.current = null;
         }
         onPositionUpdate?.({ inOval: true, countdown: null });
