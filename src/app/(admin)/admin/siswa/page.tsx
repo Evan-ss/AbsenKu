@@ -278,7 +278,7 @@ export default function SiswaPage() {
               placeholder="Cari nama, NIS, atau email..."
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none text-sm"
+              className="w-full pl-10 pr-4 py-2 bg-gray-100 rounded-full focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none text-sm transition-colors"
             />
           </div>
           <select
