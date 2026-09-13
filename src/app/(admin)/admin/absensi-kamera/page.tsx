@@ -1,24 +1,22 @@
 "use client";
 
 import { useState, useCallback, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useSession } from "next-auth/react";
 import FaceCamera from "@/components/face-camera";
-import AttendanceSidebar from "@/components/attendance-sidebar";
+import VerificationPanel from "@/components/verification-panel";
 import { formatTime } from "@/lib/format";
 
-type Step = "select-class" | "idle" | "scanning" | "success" | "error" | "already-absen";
+type Step = "select-class" | "scanning" | "verifying" | "success" | "error" | "already-absen";
 
 interface Kelas {
   id: string;
   namaKelas: string;
-  isWaliKelas?: boolean;
 }
 
 interface AbsenResult {
   message: string;
   match: boolean;
   alreadyAbsen?: boolean;
-  noFaceData?: boolean;
   distance?: number;
   absensi?: {
     id: string;
@@ -37,19 +35,20 @@ interface ScanHistory {
   status: string;
   waktuMasuk: string;
   distance: number;
+  verified: boolean;
   timestamp: number;
 }
 
-interface Siswa {
-  id: string;
+interface MatchData {
+  siswaId: string;
   nama: string;
-  nis: string;
-  status?: string;
-  waktuMasuk?: string | null;
+  kelas: string;
+  distance: number;
+  confidence: number;
 }
 
-export default function GuruAbsenPage() {
-  const router = useRouter();
+export default function AdminAbsensiKameraPage() {
+  const { data: session } = useSession();
 
   const [kelasList, setKelasList] = useState<Kelas[]>([]);
   const [selectedKelasId, setSelectedKelasId] = useState("");
@@ -66,19 +65,17 @@ export default function GuruAbsenPage() {
   const [countdown, setCountdown] = useState<number | null>(null);
   const [failedAttempts, setFailedAttempts] = useState(0);
   const [scanHistory, setScanHistory] = useState<ScanHistory[]>([]);
-  const [selectedSiswaIds, setSelectedSiswaIds] = useState<string[]>([]);
-  const [sidebarFilter, setSidebarFilter] = useState<"all" | "scanned" | "pending">("all");
-  const [sidebarRefreshKey, setSidebarRefreshKey] = useState(0);
+  const [currentMatch, setCurrentMatch] = useState<MatchData | null>(null);
+  const [verificationLoading, setVerificationLoading] = useState(false);
 
+  // Fetch kelas list on mount
   useEffect(() => {
     async function fetchKelas() {
       try {
-        const res = await fetch("/api/guru/kelas");
+        const res = await fetch("/api/kelas");
         const data = await res.json();
         if (res.ok) {
-          // Filter hanya kelas yang diampu sebagai wali kelas
-          const waliKelasList = (data.data || []).filter((k: Kelas) => k.isWaliKelas);
-          setKelasList(waliKelasList);
+          setKelasList(data.data || []);
         }
       } catch (err) {
         console.error("Error fetching kelas:", err);
@@ -91,39 +88,41 @@ export default function GuruAbsenPage() {
     const kelas = kelasList.find((k) => k.id === kelasId);
     setSelectedKelasId(kelasId);
     setSelectedKelasNama(kelas?.namaKelas || "");
-    setStep("idle");
+    setStep("scanning");
     setScanHistory([]);
-    setSelectedSiswaIds([]);
+    setCurrentMatch(null);
   };
 
   const handleFaceDetected = useCallback(
     async (descriptor: number[], photo?: string) => {
       if (submitting) return;
       setSubmitting(true);
-      setStep("scanning");
+      setStep("verifying");
 
       try {
-        const res = await fetch("/api/absen/face", {
+        const res = await fetch("/api/admin/verify-face", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             faceDescriptor: descriptor,
-            kelasId: selectedKelasId || undefined,
+            kelasId: selectedKelasId,
             fotoWajah: photo || undefined,
           }),
         });
 
-        const data: AbsenResult = await res.json();
+        const data = await res.json();
 
         if (!res.ok) {
           setStep("error");
           setErrorMsg(data.message || "Terjadi kesalahan");
+          setCurrentMatch(null);
           return;
         }
 
         if (data.match && data.alreadyAbsen) {
           setStep("already-absen");
           setFailedAttempts(0);
+          setCurrentMatch(null);
           if (data.absensi) {
             setScanHistory((prev) => [
               {
@@ -133,14 +132,26 @@ export default function GuruAbsenPage() {
                 status: "SUDAH_ABSEN",
                 waktuMasuk: data.absensi!.waktuMasuk || "",
                 distance: data.distance || 0,
+                verified: true,
                 timestamp: Date.now(),
               },
               ...prev,
             ]);
           }
+        } else if (data.match && data.needVerification) {
+          // Show verification panel with match data
+          setCurrentMatch({
+            siswaId: data.siswaId,
+            nama: data.nama,
+            kelas: data.kelas,
+            distance: data.distance,
+            confidence: data.confidence,
+          });
+          setStep("verifying");
         } else if (data.match) {
           setStep("success");
           setFailedAttempts(0);
+          setCurrentMatch(null);
           if (data.absensi) {
             setScanHistory((prev) => [
               {
@@ -150,6 +161,7 @@ export default function GuruAbsenPage() {
                 status: data.absensi!.status || "HADIR",
                 waktuMasuk: data.absensi!.waktuMasuk || "",
                 distance: data.distance || 0,
+                verified: true,
                 timestamp: Date.now(),
               },
               ...prev,
@@ -164,6 +176,7 @@ export default function GuruAbsenPage() {
               ? "Wajah tidak dikenali setelah beberapa percobaan. Silakan coba lagi."
               : `Wajah tidak cocok (${newFailed}/5). Silakan coba lagi.`
           );
+          setCurrentMatch(null);
         }
 
         setResult(data);
@@ -172,6 +185,7 @@ export default function GuruAbsenPage() {
         setFailedAttempts(newFailed);
         setStep("error");
         setErrorMsg(`Koneksi gagal (${newFailed}/5). Coba lagi.`);
+        setCurrentMatch(null);
       } finally {
         setSubmitting(false);
       }
@@ -203,60 +217,84 @@ export default function GuruAbsenPage() {
   );
 
   const resetCamera = () => {
-    setStep("idle");
+    setStep(selectedKelasId ? "scanning" : "select-class");
     setResult(null);
     setErrorMsg("");
     setCameraError("");
     setPositionStatus("waiting");
     setCountdown(null);
     setFailedAttempts(0);
+    setCurrentMatch(null);
   };
 
   const handleCameraError = useCallback((msg: string) => {
     setCameraError(msg);
   }, []);
 
-  const handleSiswaClick = (siswa: Siswa) => {
-    if (selectedSiswaIds.includes(siswa.id)) {
-      setSelectedSiswaIds((prev) => prev.filter((id) => id !== siswa.id));
-    } else {
-      setSelectedSiswaIds((prev) => [...prev, siswa.id]);
-    }
-  };
+  const handleVerifyConfirm = async (absensiId?: string) => {
+    if (!currentMatch) return;
+    setVerificationLoading(true);
 
-  const handleManualAbsen = async (siswaId: string, status: "HADIR" | "TELAT" | "IZIN" | "SAKIT" | "ALPA") => {
     try {
-      const res = await fetch("/api/absen/manual", {
+      const res = await fetch("/api/admin/verify-face", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          userId: siswaId,
-          tanggal: new Date().toISOString().split("T")[0],
-          status,
-          keterangan: status === "IZIN" || status === "SAKIT" ? "Dicatat manual oleh guru" : null,
+          action: "CONFIRM",
+          kelasId: selectedKelasId,
+          siswaId: currentMatch.siswaId,
+          absensiId,
         }),
       });
 
       const data = await res.json();
+
       if (!res.ok) {
-        alert(data.message || "Gagal mencatat absensi manual");
+        alert(data.message || "Gagal memverifikasi");
         return;
       }
 
-      alert(`Absensi manual berhasil: ${status}`);
-      setSidebarRefreshKey((prev) => prev + 1);
+      setStep("success");
+      setCurrentMatch(null);
+      if (data.absensi) {
+        setScanHistory((prev) => [
+          {
+            id: data.absensi.id,
+            nama: data.absensi.nama || "Unknown",
+            kelas: data.absensi.kelas || "—",
+            status: data.absensi.status || "HADIR",
+            waktuMasuk: data.absensi.waktuMasuk || "",
+            distance: data.distance || 0,
+            verified: true,
+            timestamp: Date.now(),
+          },
+          ...prev,
+        ]);
+      }
     } catch {
-      alert("Gagal menghubungi server");
+      alert("Gagal memverifikasi");
+    } finally {
+      setVerificationLoading(false);
     }
+  };
+
+  const handleVerifyReject = () => {
+    setCurrentMatch(null);
+    setStep("scanning");
+  };
+
+  const handleVerifySkip = () => {
+    setCurrentMatch(null);
+    setStep("scanning");
   };
 
   return (
     <div className="max-w-7xl mx-auto">
       {/* Header */}
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Absen Siswa</h1>
+        <h1 className="text-2xl font-bold text-gray-900">Verifikasi Absensi Admin</h1>
         <p className="text-gray-500 mt-1">
-          Scan wajah siswa untuk mencatat kehadiran
+          Scan wajah siswa → Verifikasi identitas → Catat absensi
         </p>
       </div>
 
@@ -268,11 +306,7 @@ export default function GuruAbsenPage() {
           </h2>
           {kelasList.length === 0 ? (
             <div className="text-center py-8">
-              <svg className="w-12 h-12 text-gray-300 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-              </svg>
-              <p className="text-gray-500">Anda bukan wali kelas untuk kelas manapun</p>
-              <p className="text-sm text-gray-400 mt-1">Hanya wali kelas yang bisa melakukan absensi siswa</p>
+              <p className="text-gray-500">Belum ada data kelas</p>
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -282,53 +316,41 @@ export default function GuruAbsenPage() {
                   onClick={() => handleClassSelect(kelas.id)}
                   className={`p-4 rounded-xl border-2 text-left transition-all ${
                     selectedKelasId === kelas.id
-                      ? "border-amber-500 bg-amber-50"
-                      : "border-gray-200 hover:border-amber-300"
+                      ? "border-blue-500 bg-blue-50"
+                      : "border-gray-200 hover:border-blue-300"
                   }`}
                 >
                   <p className="font-semibold text-gray-900">
                     {kelas.namaKelas}
                   </p>
                   <p className="text-sm text-gray-500 mt-1">
-                    {selectedKelasId === kelas.id
-                      ? "Terpilih ✓"
-                      : "Klik untuk memilih"}
+                    Klik untuk memulai verifikasi
                   </p>
                 </button>
               ))}
             </div>
           )}
-          {selectedKelasId !== "" && (
-            <div className="mt-4">
-              <button
-                onClick={() => setStep("idle")}
-                className="px-6 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-medium transition-colors"
-              >
-                Mulai Scan: {selectedKelasNama}
-              </button>
-            </div>
-          )}
         </div>
       )}
 
-      {/* Camera + Sidebar Layout */}
+      {/* Camera + Verification Layout */}
       {step !== "select-class" && (
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-          {/* Camera Section (3/4 width) */}
-          <div className="lg:col-span-3">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Camera Section (2/3 width) */}
+          <div className="lg:col-span-2">
             <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
               {/* Selected class indicator */}
               <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <span className="text-sm text-gray-500">Kelas:</span>
                   <span className="text-sm font-medium text-gray-900">{selectedKelasNama}</span>
-                  <span className="px-2 py-0.5 text-xs font-medium bg-amber-100 text-amber-700 rounded-full">
-                    Wali Kelas
+                  <span className="px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-700 rounded-full">
+                    Admin Verifikasi
                   </span>
                 </div>
                 <button
                   onClick={() => setStep("select-class")}
-                  className="text-sm text-amber-600 hover:text-amber-700 font-medium"
+                  className="text-sm text-blue-600 hover:text-blue-700 font-medium"
                 >
                   Ganti Kelas
                 </button>
@@ -340,9 +362,17 @@ export default function GuruAbsenPage() {
                 onDetectionUpdate={handleDetectionUpdate}
                 onPositionUpdate={handlePositionUpdate}
                 onError={handleCameraError}
-                active={step === "idle"}
+                active={step === "scanning"}
               >
-                {/* Status overlay inside camera */}
+                {/* Status overlays */}
+                {step === "verifying" && currentMatch && (
+                  <div className="absolute inset-0 bg-blue-900/60 flex flex-col items-center justify-center text-white rounded-xl">
+                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white mb-3" />
+                    <p className="text-sm">Memproses verifikasi untuk {currentMatch.nama}...</p>
+                    <p className="text-xs text-blue-200 mt-1">Skor: {currentMatch.distance.toFixed(3)}</p>
+                  </div>
+                )}
+
                 {step === "success" && result && (
                   <div className="absolute inset-0 bg-green-900/70 flex flex-col items-center justify-center text-white rounded-xl">
                     <div className="w-16 h-16 bg-green-500 rounded-full flex items-center justify-center mb-3">
@@ -352,8 +382,8 @@ export default function GuruAbsenPage() {
                     </div>
                     <p className="text-lg font-semibold text-center px-4">
                       {result.absensi?.nama
-                        ? `${result.absensi.nama} — Hadir!`
-                        : "Absen berhasil!"}
+                        ? `${result.absensi.nama} — Absen Berhasil!`
+                        : "Absen berhasil dicatat!"}
                     </p>
                     <p className="text-sm text-green-200 mt-1">
                       Status:{" "}
@@ -406,18 +436,11 @@ export default function GuruAbsenPage() {
                     </button>
                   </div>
                 )}
-
-                {step === "scanning" && (
-                  <div className="absolute inset-0 bg-blue-900/60 flex flex-col items-center justify-center text-white rounded-xl">
-                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white mb-3" />
-                    <p className="text-sm">Mengenali wajah siswa...</p>
-                  </div>
-                )}
               </FaceCamera>
 
-              {/* Bottom action area */}
+              {/* Bottom status */}
               <div className="p-5 border-t border-gray-100">
-                {step === "idle" && !cameraError && (
+                {step === "scanning" && !cameraError && (
                   <div className="text-center">
                     <div className="flex items-center justify-center gap-2 mb-3">
                       {positionStatus === "waiting" && (
@@ -503,7 +526,7 @@ export default function GuruAbsenPage() {
                     )}
                     <button
                       onClick={resetCamera}
-                      className="px-6 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-medium transition-colors"
+                      className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors"
                     >
                       Scan Siswa Berikutnya
                     </button>
@@ -513,18 +536,72 @@ export default function GuruAbsenPage() {
             </div>
           </div>
 
-          {/* Attendance Sidebar (1/4 width) */}
+          {/* Verification Panel (1/3 width) */}
           <div className="lg:col-span-1">
-            <AttendanceSidebar
-              key={sidebarRefreshKey}
-              kelasId={selectedKelasId}
-              selectedSiswaIds={selectedSiswaIds}
-              onSiswaClick={handleSiswaClick}
-              onManualAbsen={handleManualAbsen}
-              filter={sidebarFilter}
-              onFilterChange={setSidebarFilter}
-              autoRefresh={true}
-            />
+            <div className="sticky top-6">
+              <VerificationPanel
+                match={currentMatch}
+                onConfirm={handleVerifyConfirm}
+                onReject={handleVerifyReject}
+                onSkip={handleVerifySkip}
+                onDetail={() => {}}
+                isLoading={verificationLoading}
+              />
+
+              {/* Scan History */}
+              <div className="mt-6 bg-white rounded-xl border border-gray-200 p-4">
+                <h3 className="text-sm font-semibold text-gray-900 mb-3">
+                  Riwayat Verifikasi Hari Ini
+                </h3>
+                {scanHistory.length === 0 ? (
+                  <div className="text-center py-6">
+                    <p className="text-sm text-gray-400">Belum ada verifikasi</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2 max-h-[400px] overflow-y-auto">
+                    {scanHistory.map((item) => (
+                      <div
+                        key={item.id + item.timestamp}
+                        className={`p-3 rounded-lg border ${
+                          item.status === "SUDAH_ABSEN"
+                            ? "bg-yellow-50 border-yellow-200"
+                            : item.verified
+                            ? "bg-green-50 border-green-200"
+                            : "bg-gray-50 border-gray-200"
+                        }`}
+                      >
+                        <div className="flex items-start justify-between">
+                          <div>
+                            <p className="text-sm font-medium text-gray-900">
+                              {item.nama}
+                            </p>
+                            <p className="text-xs text-gray-500">{item.kelas}</p>
+                          </div>
+                          <span
+                            className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+                              item.status === "SUDAH_ABSEN"
+                                ? "bg-yellow-100 text-yellow-700"
+                                : item.verified
+                                ? "bg-green-100 text-green-700"
+                                : "bg-gray-100 text-gray-700"
+                            }`}
+                          >
+                            {item.status === "SUDAH_ABSEN"
+                              ? "Sudah Absen"
+                              : item.verified
+                              ? "✅ Terverifikasi"
+                              : "⏳ Pending"}
+                          </span>
+                        </div>
+                        <p className="text-xs text-gray-400 mt-1">
+                          {formatTime(item.waktuMasuk)} • Skor: {item.distance.toFixed(3)}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       )}

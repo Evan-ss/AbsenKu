@@ -5,7 +5,6 @@ import { authOptions } from "@/lib/auth";
 import { writeFile, mkdir } from "fs/promises";
 import path from "path";
 
-// Fungsi untuk menghitung Euclidean distance antara dua face descriptor
 function euclideanDistance(a: number[], b: number[]): number {
   if (a.length !== b.length) return Infinity;
   let sum = 0;
@@ -15,18 +14,13 @@ function euclideanDistance(a: number[], b: number[]): number {
   return Math.sqrt(sum);
 }
 
-// Threshold untuk kecocokan wajah (semakin kecil semakin ketat)
-// 0.45 = ketat (hanya wajah yang sangat mirip)
-// face-api.js Euclidean distance: 0.0-0.4 = sangat cocok, 0.4-0.5 = cocok, >0.5 = berbeda
 const MATCH_THRESHOLD = 0.45;
 
-// Simpan foto wajah dari data URL ke public/upload/face/
 async function saveFacePhoto(
   fotoWajah: string,
   userId: string
 ): Promise<string | null> {
   try {
-    // Parse data URL: data:image/jpeg;base64,...
     const matches = fotoWajah.match(/^data:image\/(\w+);base64,(.+)$/);
     if (!matches) return null;
 
@@ -49,43 +43,71 @@ async function saveFacePhoto(
   }
 }
 
-// Fungsi untuk menentukan status absen berdasarkan jadwal
-// Sebelum jamMulaiMasuk → HADIR (absen awal diperbolehkan)
-// Antara jamMulaiMasuk dan jamSelesaiMasuk → HADIR
-// Setelah jamSelesaiMasuk → TELAT
-async function determineStatus(
-  waktuSekarang: Date
-): Promise<"HADIR" | "TELAT"> {
-  const jam = waktuSekarang.getHours().toString().padStart(2, "0");
-  const menit = waktuSekarang.getMinutes().toString().padStart(2, "0");
-  const waktuStr = `${jam}:${menit}`;
-
-  const jadwal = await prisma.jadwalAbsensi.findFirst({
-    where: { aktif: true },
+async function getActiveJadwal(kelasId: string | null) {
+  if (!kelasId) {
+    return prisma.jadwalAbsensi.findFirst({ where: { aktif: true } });
+  }
+  return prisma.jadwalAbsensi.findFirst({
+    where: { kelasId, aktif: true },
   });
+}
 
-  if (!jadwal) {
-    return "HADIR";
-  }
-
-  // Sebelum jam mulai masuk → tetap HADIR (absen awal diperbolehkan)
-  if (waktuStr < jadwal.jamMulaiMasuk) {
-    return "HADIR";
-  }
-
-  // Dalam rentang jam masuk → HADIR
-  if (waktuStr <= jadwal.jamSelesaiMasuk) {
-    return "HADIR";
-  }
-
-  // Setelah jam selesai masuk → TELAT
+function determineStatusFromTime(
+  waktuStr: string,
+  jadwal: { jamMulaiMasuk: string; jamSelesaiMasuk: string } | null
+): "HADIR" | "TELAT" {
+  if (!jadwal) return "HADIR";
+  if (waktuStr < jadwal.jamMulaiMasuk) return "HADIR";
+  if (waktuStr <= jadwal.jamSelesaiMasuk) return "HADIR";
   return "TELAT";
 }
 
-// POST /api/absen/face — Absen via Face Recognition
-// - Role SISWA: siswa absen untuk diri sendiri (backward compatibility)
-// - Role GURU: guru scan wajah siswa di kelas yang ditugaskan
-// - Role ADMIN: admin scan wajah siswa (akses semua kelas)
+async function createAbsensiLog(
+  absensiId: string,
+  actorId: string,
+  actorRole: "ADMIN" | "GURU" | "SISWA",
+  action: string,
+  oldData: unknown,
+  newData: unknown
+) {
+  await prisma.absensiLog.create({
+    data: {
+      absensiId,
+      actorId,
+      actorRole,
+      action,
+      oldData: oldData as any,
+      newData: newData as any,
+    },
+  });
+}
+
+async function validateScanTime(kelasId: string | null): Promise<{ allowed: boolean; message?: string }> {
+  const jadwal = await getActiveJadwal(kelasId);
+  if (!jadwal) return { allowed: true };
+
+  const now = new Date();
+  const jam = now.getHours().toString().padStart(2, "0");
+  const menit = now.getMinutes().toString().padStart(2, "0");
+  const waktuStr = `${jam}:${menit}`;
+
+  if (waktuStr < jadwal.jamMulaiMasuk) {
+    return { allowed: true };
+  }
+
+  const toleranceMinutes = 60;
+  const [selesaiJam, selesaiMenit] = jadwal.jamSelesaiMasuk.split(":").map(Number);
+  const selesaiDate = new Date();
+  selesaiDate.setHours(selesaiJam, selesaiMenit + toleranceMinutes, 0, 0);
+  const selesaiStr = `${selesaiDate.getHours().toString().padStart(2, "0")}:${selesaiDate.getMinutes().toString().padStart(2, "0")}`;
+
+  if (waktuStr > selesaiStr) {
+    return { allowed: false, message: `Di luar batas waktu absen (selesai ${jadwal.jamSelesaiMasuk} + ${toleranceMinutes} menit toleransi)` };
+  }
+
+  return { allowed: true };
+}
+
 export async function POST(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
@@ -112,9 +134,12 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // ============================================
-    // MODE SISWA: absen untuk diri sendiri
-    // ============================================
+    const now = new Date();
+    const today = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
+    const jam = now.getHours().toString().padStart(2, "0");
+    const menit = now.getMinutes().toString().padStart(2, "0");
+    const waktuStr = `${jam}:${menit}`;
+
     if (role === "SISWA") {
       const currentUser = await prisma.user.findUnique({
         where: { id: session.user.id },
@@ -122,7 +147,7 @@ export async function POST(req: NextRequest) {
           id: true,
           nama: true,
           faceDescriptor: true,
-          kelas: { select: { namaKelas: true } },
+          kelas: { select: { id: true, namaKelas: true } },
         },
       });
 
@@ -160,25 +185,18 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      const bestMatch = {
-        id: currentUser.id,
-        nama: currentUser.nama,
-        distance,
-        kelas: currentUser.kelas?.namaKelas || null,
-      };
+      const timeValidation = await validateScanTime(currentUser.kelas?.id ?? null);
+      if (!timeValidation.allowed) {
+        return NextResponse.json(
+          { message: timeValidation.message, match: false, distance },
+          { status: 200 }
+        );
+      }
 
-      const now = new Date();
-      const today = new Date(
-        Date.UTC(now.getFullYear(), now.getMonth(), now.getDate())
-      );
+      const status = determineStatusFromTime(waktuStr, await getActiveJadwal(currentUser.kelas?.id ?? null));
 
       const existingAbsensi = await prisma.absensi.findUnique({
-        where: {
-          userId_tanggal: {
-            userId: currentUser.id,
-            tanggal: today,
-          },
-        },
+        where: { userId_tanggal: { userId: currentUser.id, tanggal: today } },
       });
 
       if (existingAbsensi) {
@@ -193,42 +211,30 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      const status = await determineStatus(now);
-
-      // Simpan foto wajah jika ada
       let fotoWajahPath: string | null = null;
       if (fotoWajah) {
-        fotoWajahPath = await saveFacePhoto(fotoWajah, bestMatch.id);
+        fotoWajahPath = await saveFacePhoto(fotoWajah, currentUser.id);
       }
 
       let absensi;
       try {
         absensi = await prisma.absensi.create({
           data: {
-            userId: bestMatch.id,
+            userId: currentUser.id,
             tanggal: today,
             waktuMasuk: now,
             status,
             fotoWajah: fotoWajahPath,
           },
-          select: {
-            id: true,
-            status: true,
-            waktuMasuk: true,
-            fotoWajah: true,
-          },
         });
       } catch (e: unknown) {
-        // P2002 = unique constraint — sudah ada absensi untuk user+tanggal ini
         if (e && typeof e === "object" && "code" in e && (e as { code: string }).code === "P2002") {
           const existing = await prisma.absensi.findUnique({
-            where: {
-              userId_tanggal: { userId: bestMatch.id, tanggal: today },
-            },
+            where: { userId_tanggal: { userId: currentUser.id, tanggal: today } },
           });
           return NextResponse.json(
             {
-              message: `${bestMatch.nama} sudah absen hari ini pukul ${existing?.waktuMasuk?.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }) || "—"}`,
+              message: `${currentUser.nama} sudah absen hari ini pukul ${existing?.waktuMasuk?.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }) || "—"}`,
               match: true,
               alreadyAbsen: true,
               absensi: existing,
@@ -239,36 +245,31 @@ export async function POST(req: NextRequest) {
         throw e;
       }
 
+      await createAbsensiLog(absensi.id, session.user.id, "SISWA", "SCAN_AUTO_FACE", null, absensi);
+
       return NextResponse.json(
         {
-          message: `Absen berhasil! Selamat datang, ${bestMatch.nama}`,
+          message: `Absen berhasil! Selamat datang, ${currentUser.nama}`,
           match: true,
-          distance: bestMatch.distance,
+          distance,
           alreadyAbsen: false,
           absensi: {
-            ...absensi,
-            nama: bestMatch.nama,
-            kelas: bestMatch.kelas,
-            distance: bestMatch.distance,
+            id: absensi.id,
+            status: absensi.status,
+            waktuMasuk: absensi.waktuMasuk,
+            fotoWajah: absensi.fotoWajah,
+            nama: currentUser.nama,
+            kelas: currentUser.kelas?.namaKelas || null,
+            distance,
           },
         },
         { status: 200 }
       );
     }
 
-    // ============================================
-    // MODE GURU/ADMIN: scan wajah siswa
-    // ============================================
-
-    // Untuk GURU: ambil kelas yang ditugaskan
-    // Untuk ADMIN: bisa akses semua kelas
-    let siswaWhere: Record<string, unknown> = {
-      role: "SISWA",
-      isActive: true,
-    };
+    let targetKelasId = kelasId;
 
     if (role === "GURU") {
-      // Ambil ID kelas yang ditugaskan ke guru ini
       const guruKelasList = await prisma.guruKelas.findMany({
         where: { guruId: session.user.id },
         select: { kelasId: true },
@@ -283,7 +284,6 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      // Jika kelasId spesifik diminta, validasi guru ditugaskan di kelas itu
       if (kelasId) {
         if (!kelasIds.includes(kelasId)) {
           return NextResponse.json(
@@ -291,19 +291,37 @@ export async function POST(req: NextRequest) {
             { status: 403 }
           );
         }
-        siswaWhere.kelasId = kelasId;
+        targetKelasId = kelasId;
       } else {
-        // Scan semua kelas yang ditugaskan
-        siswaWhere.kelasId = { in: kelasIds };
+        return NextResponse.json(
+          { message: "Silakan pilih kelas terlebih dahulu" },
+          { status: 400 }
+        );
       }
     } else if (role === "ADMIN") {
-      // Admin bisa filter per kelas atau semua
-      if (kelasId) {
-        siswaWhere.kelasId = kelasId;
+      if (!kelasId) {
+        return NextResponse.json(
+          { message: "Admin harus memilih kelas" },
+          { status: 400 }
+        );
       }
+      targetKelasId = kelasId;
     }
 
-    // Ambil semua siswa di kelas yang ditugaskan
+    const timeValidation = await validateScanTime(targetKelasId);
+    if (!timeValidation.allowed) {
+      return NextResponse.json(
+        { message: timeValidation.message, match: false },
+        { status: 200 }
+      );
+    }
+
+    const siswaWhere: Record<string, unknown> = {
+      role: "SISWA",
+      isActive: true,
+      kelasId: targetKelasId,
+    };
+
     const allSiswa = await prisma.user.findMany({
       where: siswaWhere,
       select: {
@@ -314,7 +332,6 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    // Filter hanya yang punya face descriptor valid
     const siswaList = allSiswa.filter((s) => {
       const fd = s.faceDescriptor;
       return fd !== null && fd !== undefined && Array.isArray(fd) && (fd as number[]).length >= 100;
@@ -323,7 +340,7 @@ export async function POST(req: NextRequest) {
     if (siswaList.length === 0) {
       return NextResponse.json(
         {
-          message: "Tidak ada siswa dengan data wajah yang terdaftar",
+          message: "Tidak ada siswa dengan data wajah yang terdaftar di kelas ini",
           match: false,
           noFaceData: true,
         },
@@ -331,7 +348,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Bandingkan dengan SEMUA siswa, cari yang paling cocok
     let bestDistance = Infinity;
     let bestSiswa: (typeof siswaList)[number] | null = null;
 
@@ -357,19 +373,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Wajah cocok! Cek apakah sudah absen hari ini
-    const now = new Date();
-    const today = new Date(
-      Date.UTC(now.getFullYear(), now.getMonth(), now.getDate())
-    );
-
     const existingAbsensi = await prisma.absensi.findUnique({
-      where: {
-        userId_tanggal: {
-          userId: bestSiswa.id,
-          tanggal: today,
-        },
-      },
+      where: { userId_tanggal: { userId: bestSiswa.id, tanggal: today } },
     });
 
     if (existingAbsensi) {
@@ -390,16 +395,13 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Tentukan status (HADIR / TELAT)
-    const status = await determineStatus(now);
+    const status = determineStatusFromTime(waktuStr, await getActiveJadwal(targetKelasId));
 
-    // Simpan foto wajah jika ada
     let fotoWajahPath: string | null = null;
     if (fotoWajah) {
       fotoWajahPath = await saveFacePhoto(fotoWajah, bestSiswa.id);
     }
 
-    // Catat absensi
     let absensi;
     try {
       absensi = await prisma.absensi.create({
@@ -410,20 +412,11 @@ export async function POST(req: NextRequest) {
           status,
           fotoWajah: fotoWajahPath,
         },
-        select: {
-          id: true,
-          status: true,
-          waktuMasuk: true,
-          fotoWajah: true,
-        },
       });
     } catch (e: unknown) {
-      // P2002 = unique constraint — sudah ada absensi untuk user+tanggal ini
       if (e && typeof e === "object" && "code" in e && (e as { code: string }).code === "P2002") {
         const existing = await prisma.absensi.findUnique({
-          where: {
-            userId_tanggal: { userId: bestSiswa.id, tanggal: today },
-          },
+          where: { userId_tanggal: { userId: bestSiswa.id, tanggal: today } },
         });
         return NextResponse.json(
           {
@@ -444,6 +437,8 @@ export async function POST(req: NextRequest) {
       throw e;
     }
 
+    await createAbsensiLog(absensi.id, session.user.id, role as "ADMIN" | "GURU" | "SISWA", "SCAN_AUTO_FACE", null, absensi);
+
     return NextResponse.json(
       {
         message: `Absen berhasil! ${bestSiswa.nama} — ${status === "HADIR" ? "Hadir" : "Terlambat"}`,
@@ -451,7 +446,10 @@ export async function POST(req: NextRequest) {
         distance: bestDistance,
         alreadyAbsen: false,
         absensi: {
-          ...absensi,
+          id: absensi.id,
+          status: absensi.status,
+          waktuMasuk: absensi.waktuMasuk,
+          fotoWajah: absensi.fotoWajah,
           nama: bestSiswa.nama,
           kelas: bestSiswa.kelas?.namaKelas || null,
           distance: bestDistance,

@@ -19,7 +19,7 @@ export function formatDateLong(dateStr: string | Date) {
   });
 }
 
-export function formatTime(dateStr: string | Date | null) {
+export function formatTime(dateStr: string | Date | null | undefined) {
   if (!dateStr) return "—";
   const d = new Date(dateStr);
   return d.toLocaleTimeString("id-ID", {

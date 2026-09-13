@@ -12,6 +12,9 @@ interface KelasGuru {
   totalSiswa: number;
   sudahAbsen: number;
   suratMenunggu: number;
+  isWaliKelas?: boolean;
+  isGuruMapel?: boolean;
+  mataPelajaran?: string[];
 }
 
 interface SuratPending {
@@ -238,7 +241,7 @@ export default function GuruDashboard() {
           <h2 className="text-lg font-semibold text-gray-900 mb-4">Kelas Hari Ini</h2>
           {kelasList.length === 0 ? (
             <div className="bg-white rounded-xl border border-gray-200 p-12 text-center mb-8">
-              <p className="text-gray-500">Belum ada kelas yang ditugaskan</p>
+              <p className="text-gray-500">Belum ada data kelas</p>
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
@@ -264,6 +267,20 @@ export default function GuruDashboard() {
                         <div>
                           <h3 className="font-semibold text-gray-900 group-hover:text-amber-600 transition-colors">
                             {kelas.namaKelas}
+                            {kelas.isWaliKelas && (
+                              <span className="ml-2 px-1.5 py-0.5 text-[10px] font-medium bg-amber-100 text-amber-700 rounded-full">
+                                Wali Kelas
+                              </span>
+                            )}
+                            {kelas.isGuruMapel && kelas.mataPelajaran && kelas.mataPelajaran.length > 0 && (
+                              <span className="ml-2">
+                                {kelas.mataPelajaran.map((mp) => (
+                                  <span key={mp} className="ml-1 px-1.5 py-0.5 text-[10px] font-medium bg-blue-100 text-blue-700 rounded-full">
+                                    {mp}
+                                  </span>
+                                ))}
+                              </span>
+                            )}
                           </h3>
                           <p className="text-xs text-gray-500">{kelas.totalSiswa} siswa</p>
                         </div>

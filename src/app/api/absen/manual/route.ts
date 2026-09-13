@@ -4,26 +4,59 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { z } from "zod";
 
-const manualAbsenSchema = z.object({
-  userId: z.string().uuid("User ID tidak valid").optional(),
-  tanggal: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/, "Format tanggal YYYY-MM-DD")
-    .optional(),
-  status: z.enum(["HADIR", "IZIN", "SAKIT"]),
-  keterangan: z.string().max(500).optional(),
+const manualAbsensiSchema = z.object({
+  userId: z.string().uuid("User ID tidak valid"),
+  tanggal: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Format tanggal YYYY-MM-DD"),
+  status: z.enum(["HADIR", "TELAT", "IZIN", "SAKIT", "ALPA"]),
+  keterangan: z.string().max(500).optional().nullable(),
+  waktuMasuk: z.string().optional().nullable(),
 });
 
-// POST /api/absen/manual — Absen manual (siswa untuk diri sendiri, atau guru untuk siswanya)
+async function createAbsensiLog(
+  absensiId: string,
+  actorId: string,
+  actorRole: "ADMIN" | "GURU" | "SISWA",
+  action: string,
+  oldData: unknown,
+  newData: unknown
+) {
+  await prisma.absensiLog.create({
+    data: {
+      absensiId,
+      actorId,
+      actorRole,
+      action,
+      oldData: oldData as any,
+      newData: newData as any,
+    },
+  });
+}
+
+async function getJadwalForKelas(kelasId: string | null) {
+  if (!kelasId) {
+    return prisma.jadwalAbsensi.findFirst({ where: { aktif: true } });
+  }
+  return prisma.jadwalAbsensi.findFirst({
+    where: { kelasId, aktif: true },
+  });
+}
+
+function determineStatus(waktuStr: string, jadwal: { jamMulaiMasuk: string; jamSelesaiMasuk: string } | null): "HADIR" | "TELAT" {
+  if (!jadwal) return "HADIR";
+  if (waktuStr < jadwal.jamMulaiMasuk) return "HADIR";
+  if (waktuStr <= jadwal.jamSelesaiMasuk) return "HADIR";
+  return "TELAT";
+}
+
 export async function POST(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session) {
+    if (!session || (session.user.role !== "GURU" && session.user.role !== "ADMIN")) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
 
     const body = await req.json();
-    const validation = manualAbsenSchema.safeParse(body);
+    const validation = manualAbsensiSchema.safeParse(body);
 
     if (!validation.success) {
       return NextResponse.json(
@@ -32,113 +65,78 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { userId: targetUserId, tanggal, status, keterangan } = validation.data;
-    const role = session.user.role;
+    const { userId, tanggal, status, keterangan, waktuMasuk } = validation.data;
 
-    // Determine target user
-    let targetUser: string;
-    if (role === "SISWA") {
-      // Siswa only absen for themselves
-      targetUser = session.user.id;
-    } else if (role === "GURU") {
-      // Guru absen for a student in their class
-      if (!targetUserId) {
-        return NextResponse.json(
-          { message: "userId harus diisi untuk guru" },
-          { status: 400 }
-        );
-      }
+    const targetUser = await prisma.user.findUnique({
+      where: { id: userId },
+      include: { kelas: true },
+    });
 
-      // Verify the student is in a class assigned to this guru
-      const student = await prisma.user.findUnique({
-        where: { id: targetUserId },
-        select: { id: true, kelasId: true },
-      });
-
-      if (!student || !student.kelasId) {
-        return NextResponse.json(
-          { message: "Siswa tidak ditemukan" },
-          { status: 404 }
-        );
-      }
-
-      const guruKelas = await prisma.guruKelas.findUnique({
-        where: {
-          guruId_kelasId: {
-            guruId: session.user.id,
-            kelasId: student.kelasId,
-          },
-        },
-      });
-
-      if (!guruKelas) {
-        return NextResponse.json(
-          { message: "Anda tidak ditugaskan di kelas siswa ini" },
-          { status: 403 }
-        );
-      }
-
-      targetUser = targetUserId;
-    } else {
-      return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    if (!targetUser || targetUser.role !== "SISWA") {
+      return NextResponse.json({ message: "Siswa tidak ditemukan" }, { status: 404 });
     }
 
-    // Determine date
-    const targetDate = tanggal ? new Date(tanggal) : new Date();
-    const tanggalUTC = new Date(
-      Date.UTC(
-        targetDate.getFullYear(),
-        targetDate.getMonth(),
-        targetDate.getDate()
-      )
-    );
+    if (session.user.role === "GURU") {
+      const guruKelas = await prisma.guruKelas.findUnique({
+        where: { guruId_kelasId: { guruId: session.user.id, kelasId: targetUser.kelasId! } },
+      });
+      if (!guruKelas) {
+        return NextResponse.json({ message: "Anda tidak wali kelas siswa ini" }, { status: 403 });
+      }
+    }
 
-    // Check if already absen
+    const tgl = new Date(tanggal);
     const existing = await prisma.absensi.findUnique({
-      where: {
-        userId_tanggal: {
-          userId: targetUser,
-          tanggal: tanggalUTC,
-        },
-      },
+      where: { userId_tanggal: { userId, tanggal: tgl } },
     });
+
+    const now = new Date();
+    const jam = now.getHours().toString().padStart(2, "0");
+    const menit = now.getMinutes().toString().padStart(2, "0");
+    const waktuStr = waktuMasuk || `${jam}:${menit}`;
+
+    const jadwal = await getJadwalForKelas(targetUser.kelasId);
+    const finalStatus = status === "HADIR" || status === "TELAT" ? determineStatus(waktuStr, jadwal) : status;
+
+    let absensi;
+    let action: string;
+    let oldData: unknown = null;
 
     if (existing) {
-      return NextResponse.json(
-        { message: "Siswa sudah absen pada tanggal ini" },
-        { status: 409 }
-      );
+      oldData = { ...existing };
+      absensi = await prisma.absensi.update({
+        where: { id: existing.id },
+        data: {
+          status: finalStatus,
+          keterangan: keterangan || null,
+          waktuMasuk: waktuMasuk ? new Date(waktuMasuk) : (status === "HADIR" || status === "TELAT" ? now : null),
+          updatedAt: new Date(),
+        },
+        include: { user: { select: { id: true, nama: true, nis: true, kelas: { select: { namaKelas: true } } } } },
+      });
+      action = "EDIT_MANUAL";
+    } else {
+      absensi = await prisma.absensi.create({
+        data: {
+          userId,
+          tanggal: tgl,
+          waktuMasuk: waktuMasuk ? new Date(waktuMasuk) : (status === "HADIR" || status === "TELAT" ? now : null),
+          status: finalStatus,
+          keterangan: keterangan || null,
+        },
+        include: { user: { select: { id: true, nama: true, nis: true, kelas: { select: { namaKelas: true } } } } },
+      });
+      action = "CREATE_MANUAL";
     }
 
-    // Create absensi
-    const absensi = await prisma.absensi.create({
-      data: {
-        userId: targetUser,
-        tanggal: tanggalUTC,
-        status,
-        keterangan: `[MANUAL] ${keterangan || (role === "GURU" ? "Absen manual oleh guru" : "Absen manual oleh siswa")}`,
-        waktuMasuk: status === "HADIR" ? new Date() : null,
-      },
-      select: {
-        id: true,
-        status: true,
-        tanggal: true,
-        waktuMasuk: true,
-      },
-    });
+    await createAbsensiLog(absensi.id, session.user.id, session.user.role as "ADMIN" | "GURU" | "SISWA", action, oldData, absensi);
 
     return NextResponse.json(
-      {
-        message: `Absen ${status} berhasil dicatat`,
-        data: absensi,
-      },
-      { status: 201 }
+      { message: "Absensi manual berhasil dicatat", data: absensi },
+      { status: existing ? 200 : 201 }
     );
   } catch (error) {
-    console.error("Error manual absen:", error);
-    return NextResponse.json(
-      { message: "Terjadi kesalahan server" },
-      { status: 500 }
-    );
+    console.error("Error manual absensi:", error);
+    return NextResponse.json({ message: "Terjadi kesalahan server" }, { status: 500 });
   }
 }

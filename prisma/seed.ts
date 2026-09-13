@@ -66,10 +66,10 @@ async function main() {
 
   console.log(`✅ ${kelasList.length} classes created`);
 
-  // Create default guru
+  // Create default guru (wali kelas)
   const guruPassword = await bcrypt.hash("guru123", 10);
 
-  const guru = await prisma.user.upsert({
+  const guruWali = await prisma.user.upsert({
     where: { email: "guru@sekolah.com" },
     update: {},
     create: {
@@ -81,18 +81,57 @@ async function main() {
     },
   });
 
-  console.log(`✅ Guru created: ${guru.email} (password: guru123)`);
+  console.log(`✅ Guru Wali created: ${guruWali.email} (password: guru123)`);
 
-  // Assign guru to first 2 classes
+  // Create guru mapel (Informatika) yang juga wali kelas lain
+  const guruMapel = await prisma.user.upsert({
+    where: { email: "informatika@sekolah.com" },
+    update: {},
+    create: {
+      nama: "Pak Informatika",
+      nis: null,
+      email: "informatika@sekolah.com",
+      password: guruPassword,
+      role: "GURU",
+    },
+  });
+
+  console.log(`✅ Guru Mapel created: ${guruMapel.email} (password: guru123)`);
+
+  // Assign guru wali to first 2 classes
   const allKelas = await prisma.kelas.findMany({ take: 2 });
   for (const k of allKelas) {
     await prisma.guruKelas.upsert({
-      where: { guruId_kelasId: { guruId: guru.id, kelasId: k.id } },
+      where: { guruId_kelasId: { guruId: guruWali.id, kelasId: k.id } },
       update: {},
-      create: { guruId: guru.id, kelasId: k.id },
+      create: { guruId: guruWali.id, kelasId: k.id },
     });
   }
-  console.log(`✅ Guru assigned to ${allKelas.length} classes`);
+  console.log(`✅ Guru Wali assigned to ${allKelas.length} classes`);
+
+  // Guru Informatika juga wali kelas XII IPA 1
+  const kelasXII = await prisma.kelas.findFirst({ where: { namaKelas: "XII IPA 1" } });
+  if (kelasXII) {
+    await prisma.guruKelas.upsert({
+      where: { guruId_kelasId: { guruId: guruMapel.id, kelasId: kelasXII.id } },
+      update: {},
+      create: { guruId: guruMapel.id, kelasId: kelasXII.id },
+    });
+    console.log(`✅ Guru Informatika assigned as Wali Kelas XII IPA 1`);
+  }
+
+  // Guru Informatika mengajar di X IPA 1, X IPA 2, XI IPA 1
+  const mapelClasses = await prisma.kelas.findMany({
+    where: { namaKelas: { in: ["X IPA 1", "X IPA 2", "XI IPA 1"] } },
+  });
+  for (const k of mapelClasses) {
+    await prisma.guruMapel.upsert({
+      where: { guruId_kelasId_mataPelajaran: { guruId: guruMapel.id, kelasId: k.id, mataPelajaran: "Informatika" } },
+      update: {},
+      create: { guruId: guruMapel.id, kelasId: k.id, mataPelajaran: "Informatika" },
+    });
+  }
+  console.log(`✅ Guru Informatika assigned as Guru Mapel to ${mapelClasses.length} classes`);
 
   // Create sample students for first 2 classes
   const siswaPassword = await bcrypt.hash("siswa123", 10);
@@ -128,7 +167,8 @@ async function main() {
   console.log("");
   console.log("📋 Login credentials:");
   console.log("   Admin : admin@sekolah.com / admin123");
-  console.log("   Guru  : guru@sekolah.com  / guru123");
+  console.log("   Guru Wali: guru@sekolah.com / guru123");
+  console.log("   Guru Mapel+Wali: informatika@sekolah.com / guru123");
   console.log("   Siswa : andi@sekolah.com  / siswa123");
 }
 

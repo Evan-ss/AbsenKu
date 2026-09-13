@@ -27,10 +27,11 @@ model User {
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
-  absensi     Absensi[]
-  guruKelas   GuruKelas[]  @relation("GuruKelasGuru")
-  suratIzin   SuratIzin[]  @relation("SuratSiswa")
-  suratReview SuratIzin[]  @relation("ReviewerSurat")
+  absensi      Absensi[]
+  guruKelas    GuruKelas[]   @relation("GuruKelasGuru")
+  guruMapel    GuruMapel[]   @relation("GuruMapelGuru")
+  suratIzin    SuratIzin[]   @relation("SuratSiswa")
+  suratReview  SuratIzin[]   @relation("ReviewerSurat")
 
   @@map("users")
 }
@@ -50,15 +51,17 @@ model Kelas {
   waliKelas String?
   createdAt DateTime @default(now())
 
-  siswa     User[]
-  guruKelas GuruKelas[] @relation("GuruKelasKelas")
+  siswa         User[]
+  guruKelas     GuruKelas[]    @relation("GuruKelasKelas")
+  guruMapel     GuruMapel[]    @relation("GuruMapelKelas")
+  jadwalAbsensi JadwalAbsensi[]
 
   @@map("kelas")
 }
 
 // ============================
 // MODEL: GURU KELAS (pivot guru ↔ kelas)
-// Menghubungkan akun Guru dengan kelas yang menjadi tanggung jawabnya.
+// Menghubungkan akun Guru dengan kelas yang menjadi tanggung jawabnya (Wali Kelas).
 // Dipakai untuk "Menu Pilih Kelas" di dashboard guru.
 // ============================
 model GuruKelas {
@@ -70,6 +73,23 @@ model GuruKelas {
 
   @@id([guruId, kelasId])
   @@map("guru_kelas")
+}
+
+// ============================
+// MODEL: GURU MAPEL (pivot guru ↔ kelas ↔ mata pelajaran)
+// Menghubungkan akun Guru dengan kelas dan mata pelajaran yang diajar.
+// Guru mapel bisa lihat status absensi siswa di kelas yang diajar.
+// ============================
+model GuruMapel {
+  guruId    String   @db.Char(36)
+  kelasId   String   @db.Char(36)
+  mataPelajaran String
+  guru      User     @relation("GuruMapelGuru", fields: [guruId], references: [id], onDelete: Cascade)
+  kelas     Kelas    @relation("GuruMapelKelas", fields: [kelasId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@id([guruId, kelasId, mataPelajaran])
+  @@map("guru_mapel")
 }
 
 // ============================
@@ -113,16 +133,24 @@ enum StatusSurat {
 // MODEL: ABSENSI
 // ============================
 model Absensi {
-  id          String        @id @default(uuid()) @db.Char(36)
-  userId      String        @db.Char(36)
-  user        User          @relation(fields: [userId], references: [id])
-  tanggal     DateTime      @db.Date
-  waktuMasuk  DateTime?
-  waktuPulang DateTime?
-  status      StatusAbsensi @default(HADIR)
-  keterangan  String?
-  fotoWajah   String?       @db.VarChar(500)
-  createdAt   DateTime      @default(now())
+  id             String         @id @default(uuid()) @db.Char(36)
+  userId         String         @db.Char(36)
+  user           User           @relation(fields: [userId], references: [id])
+  tanggal        DateTime       @db.Date
+  waktuMasuk     DateTime?
+  waktuPulang    DateTime?
+  status         StatusAbsensi  @default(HADIR)
+  keterangan     String?
+  fotoWajah      String?        @db.VarChar(500)
+  statusPulang   StatusPulang?  @default(BELUM)
+  fotoPulang     String?        @db.VarChar(500)
+  verifiedBy     String?        @db.Char(36)
+  verifiedAt     DateTime?
+  isAutoCheckout Boolean        @default(false)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  logs           AbsensiLog[]
 
   @@unique([userId, tanggal])
   @@index([tanggal, status])
@@ -137,6 +165,13 @@ enum StatusAbsensi {
   ALPA
 }
 
+enum StatusPulang {
+  BELUM
+  TEPAT_WAKTU
+  LEBIH_AWAL
+  AUTO
+}
+
 // ============================
 // MODEL: JADWAL ABSENSI
 // ============================
@@ -148,7 +183,29 @@ model JadwalAbsensi {
   jamMulaiPulang   String?
   jamSelesaiPulang String?
   aktif            Boolean  @default(true)
+  kelasId          String?  @db.Char(36)
+  kelas            Kelas?   @relation(fields: [kelasId], references: [id], onDelete: Cascade)
   updatedAt        DateTime @updatedAt
 
+  @@unique([kelasId, namaJadwal])
   @@map("jadwal_absensi")
+}
+
+// ============================
+// MODEL: ABSENSI LOG (Audit Trail)
+// ============================
+model AbsensiLog {
+  id        String   @id @default(uuid()) @db.Char(36)
+  absensiId String   @db.Char(36)
+  absensi   Absensi  @relation(fields: [absensiId], references: [id], onDelete: Cascade)
+  actorId   String   @db.Char(36)
+  actorRole Role
+  action    String
+  oldData   Json?
+  newData   Json?
+  createdAt DateTime @default(now())
+
+  @@index([absensiId])
+  @@index([actorId, createdAt])
+  @@map("absensi_log")
 }

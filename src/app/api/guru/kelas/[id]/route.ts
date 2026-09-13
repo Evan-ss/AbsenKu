@@ -6,6 +6,7 @@ import { authOptions } from "@/lib/auth";
 type Params = { params: Promise<{ id: string }> };
 
 // GET /api/guru/kelas/[id] — Detail absensi real-time untuk kelas tertentu
+// Semua guru bisa lihat, tapi hanya wali kelas yang bisa absen
 export async function GET(req: NextRequest, { params }: Params) {
   try {
     const session = await getServerSession(authOptions);
@@ -15,14 +16,24 @@ export async function GET(req: NextRequest, { params }: Params) {
 
     const { id } = await params;
 
-    // Cek apakah guru ditugaskan di kelas ini
+    // Cek apakah guru ini wali kelas untuk kelas ini
     const guruKelas = await prisma.guruKelas.findUnique({
       where: { guruId_kelasId: { guruId: session.user.id, kelasId: id } },
     });
+    const isWaliKelas = !!guruKelas;
 
-    if (!guruKelas) {
+    // Cek apakah guru ini guru mapel untuk kelas ini
+    const guruMapel = await prisma.guruMapel.findMany({
+      where: { guruId: session.user.id, kelasId: id },
+      select: { mataPelajaran: true },
+    });
+    const isGuruMapel = guruMapel.length > 0;
+    const mataPelajaran = guruMapel.map((gm) => gm.mataPelajaran);
+
+    // Hanya wali kelas DAN guru mapel yang bisa akses detail kelas
+    if (!isWaliKelas && !isGuruMapel) {
       return NextResponse.json(
-        { message: "Anda tidak ditugaskan di kelas ini" },
+        { message: "Anda tidak diampu di kelas ini" },
         { status: 403 }
       );
     }
@@ -171,6 +182,9 @@ export async function GET(req: NextRequest, { params }: Params) {
             jamSelesaiMasuk: jadwal.jamSelesaiMasuk,
           }
         : null,
+      isWaliKelas,
+      isGuruMapel,
+      mataPelajaran,
     });
   } catch (error) {
     console.error("Error fetching kelas detail:", error);
