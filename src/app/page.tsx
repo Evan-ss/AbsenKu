@@ -261,7 +261,7 @@ export default function HomePage() {
             <figure>
               <div className="border border-rule bg-paper-dim">
                 <Image
-                  src="/upload/Banner.jpg"
+                  src="/asset/Banner.jpg"
                   alt="Suasana absensi siswa dengan pemindaian wajah di sekolah"
                   width={1376}
                   height={768}
