@@ -6,7 +6,9 @@ import { authOptions } from "@/lib/auth";
 type Params = { params: Promise<{ id: string }> };
 
 // GET /api/guru/kelas/[id] — Detail absensi real-time untuk kelas tertentu
-// Semua guru bisa lihat, tapi hanya wali kelas yang bisa absen
+// - Wali kelas: full access ke kelas yang diampu, read-only ke kelas lain
+// - Guru Mapel (bukan wali): read-only ke kelas mapel yang diampu
+// - Guru tanpa tugas: tidak bisa akses
 export async function GET(req: NextRequest, { params }: Params) {
   try {
     const session = await getServerSession(authOptions);
@@ -22,6 +24,12 @@ export async function GET(req: NextRequest, { params }: Params) {
     });
     const isWaliKelas = !!guruKelas;
 
+    // Cek apakah guru ini wali kelas untuk KELAS MANA PUN
+    const anyWaliKelas = await prisma.guruKelas.findFirst({
+      where: { guruId: session.user.id },
+    });
+    const isAnyWaliKelas = !!anyWaliKelas;
+
     // Cek apakah guru ini guru mapel untuk kelas ini
     const guruMapel = await prisma.guruMapel.findMany({
       where: { guruId: session.user.id, kelasId: id },
@@ -30,8 +38,15 @@ export async function GET(req: NextRequest, { params }: Params) {
     const isGuruMapel = guruMapel.length > 0;
     const mataPelajaran = guruMapel.map((gm) => gm.mataPelajaran);
 
-    // Hanya wali kelas DAN guru mapel yang bisa akses detail kelas
-    if (!isWaliKelas && !isGuruMapel) {
+    // Otorisasi:
+    // 1. Wali kelas untuk kelas ini → full access
+    // 2. Guru mapel untuk kelas ini → read-only
+    // 3. Wali kelas untuk kelas LAIN → read-only (bisa lihat semua kelas)
+    // 4. Bukan wali & bukan mapel untuk kelas ini → 403
+    const canAccess = isWaliKelas || isGuruMapel || isAnyWaliKelas;
+    const isReadOnly = !isWaliKelas; // Wali kelas untuk KELAS INI = full access, selain itu read-only
+
+    if (!canAccess) {
       return NextResponse.json(
         { message: "Anda tidak diampu di kelas ini" },
         { status: 403 }
@@ -183,6 +198,7 @@ export async function GET(req: NextRequest, { params }: Params) {
           }
         : null,
       isWaliKelas,
+      isReadOnly,
       isGuruMapel,
       mataPelajaran,
     });

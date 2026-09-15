@@ -85,6 +85,7 @@ export default function GuruKelasDetailPage({
   });
   const [loading, setLoading] = useState(true);
   const [isWaliKelas, setIsWaliKelas] = useState(false);
+  const [isReadOnly, setIsReadOnly] = useState(true);
   const [isGuruMapel, setIsGuruMapel] = useState(false);
   const [mataPelajaran, setMataPelajaran] = useState<string[]>([]);
   const [activeTab, setActiveTab] = useState<"absensi" | "foto">("absensi");
@@ -128,6 +129,7 @@ export default function GuruKelasDetailPage({
   };
 
   const fetchData = useCallback(async () => {
+    if (!id) return; // Wait for id to be resolved
     setLoading(true);
     try {
       const res = await fetch(`/api/guru/kelas/${id}?tanggal=${tanggal}`);
@@ -142,6 +144,7 @@ export default function GuruKelasDetailPage({
       setSiswaList(data.siswa);
       setSummary(data.summary);
       setIsWaliKelas(data.isWaliKelas || false);
+      setIsReadOnly(data.isReadOnly !== false); // default true for safety
       setIsGuruMapel(data.isGuruMapel || false);
       setMataPelajaran(data.mataPelajaran || []);
     } catch (err) {
@@ -293,7 +296,7 @@ export default function GuruKelasDetailPage({
           </div>
 
           {/* Wali Kelas Only: Action Bar for marking ALPA */}
-          {isWaliKelas && activeTab === "absensi" && summary && summary.belumAbsen > 0 && (
+          {!isReadOnly && activeTab === "absensi" && summary && summary.belumAbsen > 0 && (
             <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6">
               <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                 <div>
@@ -315,7 +318,7 @@ export default function GuruKelasDetailPage({
           )}
 
           {/* Guru Non-Wali & Guru Mapel: Read-only notice */}
-          {(!isWaliKelas || isGuruMapel) && activeTab === "absensi" && summary && summary.belumAbsen > 0 && (
+          {isReadOnly && activeTab === "absensi" && summary && summary.belumAbsen > 0 && (
             <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6">
               <div className="flex items-start gap-3">
                 <svg className="w-5 h-5 text-blue-600 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -328,7 +331,9 @@ export default function GuruKelasDetailPage({
                   <p className="text-xs text-blue-700 mt-0.5">
                     {isGuruMapel 
                       ? `Anda Guru Mapel (${mataPelajaran.join(", ")}). Hanya wali kelas yang dapat mengelola absensi.`
-                      : "Anda bukan wali kelas ini. Hanya wali kelas yang dapat mengelola absensi."
+                      : isWaliKelas
+                        ? "Anda Wali Kelas lain. Mode baca saja untuk kelas ini."
+                        : "Anda bukan wali kelas ini. Hanya wali kelas yang dapat mengelola absensi."
                     }
                     <br />
                     {summary.belumAbsen > 0 && `${summary.belumAbsen} siswa belum absen hari ini.`}

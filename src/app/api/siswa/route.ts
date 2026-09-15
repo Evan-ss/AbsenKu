@@ -55,6 +55,9 @@ export async function GET(req: NextRequest) {
             select: { id: true, namaKelas: true },
           },
           faceDescriptor: true,
+          rfidCards: {
+            select: { id: true, uid: true, isActive: true },
+          },
           createdAt: true,
           updatedAt: true,
         },

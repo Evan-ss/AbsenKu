@@ -31,9 +31,8 @@ interface ScanHistory {
   timestamp: number;
 }
 
-export default function GuruRfidPage() {
+export default function AdminAbsensiRfidPage() {
   const router = useRouter();
-
   const [step, setStep] = useState<Step>("idle");
   const [result, setResult] = useState<ScanResult | null>(null);
   const [errorMsg, setErrorMsg] = useState("");
@@ -135,7 +134,7 @@ export default function GuruRfidPage() {
           </p>
         </div>
         <button
-          onClick={() => router.push("/guru/dashboard")}
+          onClick={() => router.push("/admin/dashboard")}
           className="inline-flex items-center gap-2 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 text-sm font-medium transition-colors"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -256,7 +255,7 @@ export default function GuruRfidPage() {
                 )}
               </div>
 
-{/* Bottom action area */}
+              {/* Bottom action area */}
               <div className="p-5 border-t border-gray-100 text-center">
                 <p className="text-sm text-gray-500">
                   Tempelkan kartu RFID ke reader atau ketik UID lalu tekan Enter

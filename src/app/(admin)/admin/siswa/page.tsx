@@ -1,8 +1,14 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef } from "react";
-import FaceCapture from "@/components/face-capture";
+import dynamic from "next/dynamic";
 import { useSweetAlert } from "@/components/sweet-alert";
+
+// Lazy-load komponen kamera (face-api.js) agar halaman data siswa tetap ringan.
+// face-camera hanya dimuat saat modal "Rekam Wajah" benar-benar dibuka.
+const FaceCapture = dynamic(() => import("@/components/face-capture"), {
+  ssr: false,
+});
 
 // Types
 interface Kelas {
@@ -19,6 +25,7 @@ interface Siswa {
   kelasId: string | null;
   faceDescriptor?: number[] | null;
   kelas: { id: string; namaKelas: string } | null;
+  rfidCards?: { id: string; uid: string; isActive: boolean }[];
   createdAt: string;
   updatedAt: string;
 }
@@ -36,6 +43,7 @@ interface SiswaFormData {
   email: string;
   password: string;
   kelasId: string;
+  rfidUid: string;
 }
 
 const emptyForm: SiswaFormData = {
@@ -44,6 +52,7 @@ const emptyForm: SiswaFormData = {
   email: "",
   password: "",
   kelasId: "",
+  rfidUid: "",
 };
 
 export default function SiswaPage() {
@@ -79,6 +88,7 @@ export default function SiswaPage() {
   const [createdSiswaId, setCreatedSiswaId] = useState<string | null>(null);
   const [createdSiswaNama, setCreatedSiswaNama] = useState("");
   const faceSavedRef = useRef(false);
+  const currentRfidCardRef = useRef<{ id: string; uid: string } | null>(null);
 
   // Fetch siswa
   const fetchSiswa = useCallback(async () => {
@@ -129,6 +139,7 @@ export default function SiswaPage() {
     setEditingId(null);
     setForm(emptyForm);
     setFormError("");
+    currentRfidCardRef.current = null;
     setModalOpen(true);
   };
 
@@ -136,15 +147,72 @@ export default function SiswaPage() {
   const openEditModal = (siswa: Siswa) => {
     setModalMode("edit");
     setEditingId(siswa.id);
+    const activeCard =
+      siswa.rfidCards?.find((c) => c.isActive) ?? null;
+    currentRfidCardRef.current = activeCard
+      ? { id: activeCard.id, uid: activeCard.uid }
+      : null;
     setForm({
       nama: siswa.nama,
       nis: siswa.nis,
       email: siswa.email,
       password: "",
       kelasId: siswa.kelasId || "",
+      rfidUid: activeCard?.uid ?? "",
     });
     setFormError("");
     setModalOpen(true);
+  };
+
+  // Sinkronkan kartu RFID saat edit siswa
+  // - UID sama → tidak melakukan apa-apa
+  // - Ada kartu + UID berubah → perbarui UID kartu
+  // - Ada kartu + UID dikosongkan → cabut kartu
+  // - Tidak ada kartu + UID diisi → tautkan kartu baru
+  const handleEditRfid = async (userId: string) => {
+    const desired = form.rfidUid.trim().toUpperCase();
+    const before = currentRfidCardRef.current;
+    const beforeUid = (before?.uid || "").toUpperCase();
+
+    if (desired === beforeUid) return;
+
+    try {
+      if (before) {
+        if (desired) {
+          // Ganti UID kartu yang sudah ada
+          const res = await fetch(`/api/admin/rfid/${before.id}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ uid: desired }),
+          });
+          const data = await res.json();
+          if (!res.ok)
+            throw new Error(data.message || "Gagal memperbarui kartu RFID");
+        } else {
+          // Cabut kartu karena UID dikosongkan
+          const res = await fetch(`/api/admin/rfid/${before.id}`, {
+            method: "DELETE",
+          });
+          const data = await res.json();
+          if (!res.ok)
+            throw new Error(data.message || "Gagal mencabut kartu RFID");
+        }
+      } else if (desired) {
+        // Tautkan kartu baru karena siswa belum punya kartu
+        const res = await fetch("/api/admin/rfid", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ uid: desired, userId }),
+        });
+        const data = await res.json();
+        if (!res.ok)
+          throw new Error(data.message || "Gagal menautkan kartu RFID");
+      }
+    } catch (err) {
+      throw new Error(
+        err instanceof Error ? err.message : "Gagal memperbarui kartu RFID"
+      );
+    }
   };
 
   // Handle form submit
@@ -162,6 +230,41 @@ export default function SiswaPage() {
         });
         const result = await res.json();
         if (!res.ok) throw new Error(result.message);
+
+        // Opsional: tautkan kartu RFID jika UID diisi
+        const rfidUid = form.rfidUid.trim();
+        if (rfidUid) {
+          try {
+            const rfidRes = await fetch("/api/admin/rfid", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ uid: rfidUid, userId: result.data.id }),
+            });
+            const rfidResult = await rfidRes.json();
+            if (rfidRes.ok) {
+              showAlert({
+                title: "Kartu RFID Tertaut",
+                message: "Siswa berhasil ditambahkan dan kartu RFID berhasil ditautkan.",
+                type: "success",
+                autoClose: 2500,
+              });
+            } else {
+              showAlert({
+                title: "Perhatian",
+                message: `Siswa berhasil ditambahkan, tetapi kartu RFID gagal ditautkan: ${rfidResult.message}.`,
+                type: "warning",
+                autoClose: 5000,
+              });
+            }
+          } catch {
+            showAlert({
+              title: "Perhatian",
+              message: "Siswa berhasil ditambahkan, tetapi kartu RFID gagal ditautkan.",
+              type: "warning",
+              autoClose: 5000,
+            });
+          }
+        }
 
         // Tutup form modal dulu, buka modal rekam wajah
         setModalOpen(false);
@@ -185,6 +288,21 @@ export default function SiswaPage() {
         });
         const result = await res.json();
         if (!res.ok) throw new Error(result.message);
+
+        // Sinkronkan kartu RFID (opsional)
+        try {
+          await handleEditRfid(editingId!);
+        } catch (rfidErr) {
+          showAlert({
+            title: "Perhatian",
+            message:
+              rfidErr instanceof Error
+                ? rfidErr.message
+                : "Gagal memperbarui kartu RFID.",
+            type: "warning",
+            autoClose: 5000,
+          });
+        }
 
         setModalOpen(false);
         fetchSiswa();
@@ -741,6 +859,51 @@ export default function SiswaPage() {
                   }
                 />
               </div>
+
+              {modalMode === "add" && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    UID Kartu RFID{" "}
+                    <span className="text-gray-400 font-normal">(opsional)</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={form.rfidUid}
+                    onChange={(e) =>
+                      setForm({ ...form, rfidUid: e.target.value })
+                    }
+                    className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors text-sm"
+                    placeholder="Scan kartu RFID atau ketik UID"
+                  />
+                  <p className="text-xs text-gray-400 mt-1">
+                    Bisa dikosongkan. Kartu dapat ditautkan nanti melalui menu
+                    Kartu RFID.
+                  </p>
+                </div>
+              )}
+
+              {modalMode === "edit" && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    UID Kartu RFID{" "}
+                    <span className="text-gray-400 font-normal">
+                      (opsional)
+                    </span>
+                  </label>
+                  <input
+                    type="text"
+                    value={form.rfidUid}
+                    onChange={(e) =>
+                      setForm({ ...form, rfidUid: e.target.value })
+                    }
+                    className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors text-sm"
+                    placeholder="Ketik UID baru kosongkan untuk melepas kartu"
+                  />
+                  <p className="text-xs text-gray-400 mt-1">
+                    Kosongkan untuk melepas kartu yang ada pada siswa ini.
+                  </p>
+                </div>
+              )}
 
               {formError && (
                 <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">

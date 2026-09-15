@@ -122,51 +122,12 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // For GURU role, validate they are wali kelas or guru mapel for this class
-    let targetKelasId = kelasId;
-    if (role === "GURU") {
-      if (!kelasId) {
-        return NextResponse.json(
-          { message: "Guru harus memilih kelas" },
-          { status: 400 }
-        );
-      }
-
-      // Check if guru is wali kelas
-      const guruKelas = await prisma.guruKelas.findUnique({
-        where: { guruId_kelasId: { guruId: session.user.id, kelasId } },
-      });
-
-      // Check if guru is guru mapel
-      const guruMapel = await prisma.guruMapel.findFirst({
-        where: { guruId: session.user.id, kelasId },
-      });
-
-      if (!guruKelas && !guruMapel) {
-        return NextResponse.json(
-          { message: "Anda tidak diampu di kelas ini" },
-          { status: 403 }
-        );
-      }
-
-      // Verify student is in this class
-      if (user.kelas?.id !== kelasId) {
-        return NextResponse.json(
-          { message: "Siswa tidak berada di kelas ini", match: false },
-          { status: 200 }
-        );
-      }
-
-      targetKelasId = kelasId;
-    } else if (role === "ADMIN") {
-      if (!kelasId) {
-        return NextResponse.json(
-          { message: "Admin harus memilih kelas" },
-          { status: 400 }
-        );
-      }
-      targetKelasId = kelasId;
-    } else {
+    // Absen RFID berlaku untuk semua kelas (kelasId opsional).
+    // - SISWA: selalu pakai kelasnya sendiri.
+    // - ADMIN/GURU: tanpa kelasId → pakai jadwal aktif global;
+    //   jika kelasId disertakan → pakai jadwal kelas tersebut.
+    let targetKelasId: string | undefined = kelasId || undefined;
+    if (role === "SISWA") {
       // SISWA role - use their own class
       targetKelasId = user.kelas?.id || undefined;
     }

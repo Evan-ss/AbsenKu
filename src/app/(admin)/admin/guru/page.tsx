@@ -12,9 +12,17 @@ interface Guru {
   _count?: { guruKelas: number };
 }
 
+interface WaliKelasInfo {
+  guruId: string;
+  guruNama: string;
+  guruEmail: string;
+}
+
 interface Kelas {
   id: string;
   namaKelas: string;
+  waliKelas: string | null;
+  waliKelasInfo: WaliKelasInfo | null;
   _count?: { siswa: number };
 }
 
@@ -30,6 +38,13 @@ interface GuruFormData {
   password: string;
 }
 
+interface AssignFormData {
+  guruId: string;
+  kelasId: string;
+  mode: "assign" | "replace";
+  currentWaliKelas?: WaliKelasInfo;
+}
+
 const emptyGuruForm: GuruFormData = { nama: "", email: "", password: "" };
 
 export default function AdminGuruPage() {
@@ -41,10 +56,17 @@ export default function AdminGuruPage() {
 
   // Assign modal
   const [showAssignModal, setShowAssignModal] = useState(false);
-  const [selectedGuru, setSelectedGuru] = useState("");
-  const [selectedKelas, setSelectedKelas] = useState("");
+  const [assignForm, setAssignForm] = useState<AssignFormData>({
+    guruId: "",
+    kelasId: "",
+    mode: "assign",
+  });
   const [assigning, setAssigning] = useState(false);
   const [assignError, setAssignError] = useState("");
+
+  // Replace confirmation modal
+  const [showReplaceConfirm, setShowReplaceConfirm] = useState(false);
+  const [pendingAssign, setPendingAssign] = useState<AssignFormData | null>(null);
 
   // Tambah Guru modal
   const [showGuruModal, setShowGuruModal] = useState(false);
@@ -65,7 +87,12 @@ export default function AdminGuruPage() {
       const kelasData = await kelasRes.json();
       if (assignRes.ok) setAssignments(assignData.data || []);
       if (guruRes.ok) setGuruList(guruData.data || []);
-      if (kelasRes.ok) setKelasList(kelasData.data || []);
+      // Gunakan kelas dari API guru-kelas yang sudah include waliKelasInfo
+      if (kelasRes.ok && assignRes.ok && assignData.kelas) {
+        setKelasList(assignData.kelas);
+      } else if (kelasRes.ok) {
+        setKelasList(kelasData.data || []);
+      }
     } catch (err) {
       console.error("Error:", err);
     } finally {
@@ -128,20 +155,70 @@ export default function AdminGuruPage() {
     e.preventDefault();
     setAssignError("");
     setAssigning(true);
+
+    const payload = {
+      guruId: assignForm.guruId,
+      kelasId: assignForm.kelasId,
+      mode: assignForm.mode,
+    };
+
     try {
       const res = await fetch("/api/admin/guru-kelas", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ guruId: selectedGuru, kelasId: selectedKelas }),
+        body: JSON.stringify(payload),
       });
       const result = await res.json();
+
       if (!res.ok) {
+        // Jika error karena sudah ada wali kelas dan mode assign, tampilkan konfirmasi replace
+        if (res.status === 409 && result.hasExistingWaliKelas && assignForm.mode === "assign") {
+          setPendingAssign({
+            ...assignForm,
+            mode: "replace",
+            currentWaliKelas: result.currentWaliKelas,
+          });
+          setShowReplaceConfirm(true);
+          setAssigning(false);
+          return;
+        }
         setAssignError(result.message || "Gagal assign guru");
         return;
       }
+
       setShowAssignModal(false);
-      setSelectedGuru("");
-      setSelectedKelas("");
+      setAssignForm({ guruId: "", kelasId: "", mode: "assign" });
+      showAlert({ title: "Berhasil!", message: result.message, type: "success", autoClose: 2000 });
+      fetchData();
+    } catch {
+      setAssignError("Terjadi kesalahan");
+    } finally {
+      setAssigning(false);
+    }
+  };
+
+  const handleReplaceConfirm = async () => {
+    if (!pendingAssign) return;
+    setAssigning(true);
+    try {
+      const res = await fetch("/api/admin/guru-kelas", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          guruId: pendingAssign.guruId,
+          kelasId: pendingAssign.kelasId,
+          mode: "replace",
+        }),
+      });
+      const result = await res.json();
+      if (!res.ok) {
+        setAssignError(result.message || "Gagal mengganti wali kelas");
+        return;
+      }
+      setShowReplaceConfirm(false);
+      setShowAssignModal(false);
+      setPendingAssign(null);
+      setAssignForm({ guruId: "", kelasId: "", mode: "assign" });
       showAlert({ title: "Berhasil!", message: result.message, type: "success", autoClose: 2000 });
       fetchData();
     } catch {
@@ -169,13 +246,19 @@ export default function AdminGuruPage() {
     });
   };
 
+  const openAssignModal = () => {
+    setAssignForm({ guruId: "", kelasId: "", mode: "assign" });
+    setAssignError("");
+    setShowAssignModal(true);
+  };
+
   return (
     <div>
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Manajemen Guru</h1>
-          <p className="text-gray-500 mt-1">Buat akun guru & atur penugasan ke kelas</p>
+          <p className="text-gray-500 mt-1">Buat akun guru & atur penugasan wali kelas</p>
         </div>
         <div className="flex gap-2">
           <button
@@ -188,7 +271,7 @@ export default function AdminGuruPage() {
             Tambah Guru
           </button>
           <button
-            onClick={() => setShowAssignModal(true)}
+            onClick={openAssignModal}
             className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-lg text-sm font-medium transition-colors"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -285,7 +368,7 @@ export default function AdminGuruPage() {
         {assignments.length === 0 ? (
           <div className="p-12 text-center">
             <p className="text-gray-500">Belum ada penugasan</p>
-            <button onClick={() => setShowAssignModal(true)} className="mt-4 text-blue-600 hover:text-blue-700 text-sm font-medium">+ Assign guru pertama</button>
+            <button onClick={openAssignModal} className="mt-4 text-blue-600 hover:text-blue-700 text-sm font-medium">+ Assign guru pertama</button>
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -302,7 +385,14 @@ export default function AdminGuruPage() {
                 {assignments.map((a, idx) => (
                   <tr key={idx} className="hover:bg-gray-50 transition-colors">
                     <td className="px-4 py-3"><p className="text-sm font-medium text-gray-900">{a.guru.nama}</p></td>
-                    <td className="px-4 py-3"><span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">{a.kelas.namaKelas}</span></td>
+                    <td className="px-4 py-3">
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
+                        {a.kelas.namaKelas}
+                        {a.kelas.waliKelasInfo && a.kelas.waliKelasInfo.guruId === a.guru.id && (
+                          <span className="ml-1.5 px-1.5 py-0.5 text-[10px] font-medium bg-amber-100 text-amber-700 rounded">Wali</span>
+                        )}
+                      </span>
+                    </td>
                     <td className="px-4 py-3 text-center"><span className="text-sm text-gray-600">{a.kelas._count?.siswa || 0} siswa</span></td>
                     <td className="px-4 py-3 text-right">
                       <button onClick={() => handleUnassign(a.guru.id, a.kelas.id, a.guru.nama, a.kelas.namaKelas)} className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Hapus">
@@ -367,24 +457,95 @@ export default function AdminGuruPage() {
             <form onSubmit={handleAssign} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Pilih Guru</label>
-                <select value={selectedGuru} onChange={(e) => setSelectedGuru(e.target.value)} required className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none">
+                <select value={assignForm.guruId} onChange={(e) => setAssignForm({ ...assignForm, guruId: e.target.value })} required className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none">
                   <option value="">Pilih guru...</option>
                   {guruList.map((g) => (<option key={g.id} value={g.id}>{g.nama} ({g.email})</option>))}
                 </select>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Pilih Kelas</label>
-                <select value={selectedKelas} onChange={(e) => setSelectedKelas(e.target.value)} required className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none">
+                <select value={assignForm.kelasId} onChange={(e) => setAssignForm({ ...assignForm, kelasId: e.target.value })} required className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none">
                   <option value="">Pilih kelas...</option>
-                  {kelasList.map((k) => (<option key={k.id} value={k.id}>{k.namaKelas} ({k._count?.siswa || 0} siswa)</option>))}
+                  {kelasList.map((k) => (
+                    <option key={k.id} value={k.id}>
+                      {k.namaKelas} ({k._count?.siswa || 0} siswa)
+                      {k.waliKelasInfo && ` — Wali: ${k.waliKelasInfo.guruNama}`}
+                    </option>
+                  ))}
                 </select>
+                {assignForm.kelasId && kelasList.find(k => k.id === assignForm.kelasId)?.waliKelasInfo && (
+                  <p className="mt-1 text-xs text-amber-600 flex items-center gap-1">
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    Kelas ini sudah memiliki wali kelas: {kelasList.find(k => k.id === assignForm.kelasId)?.waliKelasInfo?.guruNama}
+                  </p>
+                )}
               </div>
               {assignError && <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">{assignError}</div>}
               <div className="flex gap-3 pt-2">
                 <button type="button" onClick={() => setShowAssignModal(false)} className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 text-sm font-medium transition-colors">Batal</button>
-                <button type="submit" disabled={assigning || !selectedGuru || !selectedKelas} className="flex-1 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg text-sm font-medium transition-colors">{assigning ? "Memproses..." : "Assign"}</button>
+                <button type="submit" disabled={assigning || !assignForm.guruId || !assignForm.kelasId} className="flex-1 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg text-sm font-medium transition-colors">
+                  {assigning ? "Memproses..." : assignForm.mode === "replace" ? "Ganti Wali Kelas" : "Assign"}
+                </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Konfirmasi Ganti Wali Kelas */}
+      {showReplaceConfirm && pendingAssign && pendingAssign.currentWaliKelas && pendingAssign.currentWaliKelas.guruNama && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 bg-black/50" onClick={() => setShowReplaceConfirm(false)} />
+          <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-md p-6 z-10">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-12 h-12 bg-amber-100 rounded-xl flex items-center justify-center flex-shrink-0">
+                <svg className="w-6 h-6 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+              <h3 className="text-lg font-semibold text-gray-900">Ganti Wali Kelas?</h3>
+            </div>
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-4">
+              <p className="text-sm text-amber-800 mb-2">Kelas <strong>{kelasList.find(k => k.id === pendingAssign.kelasId)?.namaKelas}</strong> sudah memiliki wali kelas:</p>
+              <div className="flex items-center gap-3 p-3 bg-white rounded-lg border border-amber-100">
+                <div className="w-8 h-8 bg-amber-100 rounded-lg flex items-center justify-center">
+                  <span className="text-sm font-semibold text-amber-600">{pendingAssign.currentWaliKelas.guruNama.charAt(0)}</span>
+                </div>
+                <div>
+                  <p className="font-medium text-amber-800">{pendingAssign.currentWaliKelas.guruNama}</p>
+                  <p className="text-xs text-amber-600">{pendingAssign.currentWaliKelas.guruEmail || "-"}</p>
+                </div>
+              </div>
+            </div>
+            <p className="text-sm text-gray-600 mb-4">
+              Guru baru: <strong>{guruList.find(g => g.id === pendingAssign.guruId)?.nama}</strong> akan menggantikan wali kelas di atas.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowReplaceConfirm(false)}
+                className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 text-sm font-medium transition-colors"
+              >
+                Batal
+              </button>
+              <button
+                onClick={handleReplaceConfirm}
+                disabled={assigning}
+                className="flex-1 px-4 py-2.5 bg-amber-600 hover:bg-amber-700 disabled:bg-amber-400 text-white rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2"
+              >
+                {assigning ? (
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
+                ) : (
+                  <>
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                    Ya, Ganti Wali Kelas
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}
